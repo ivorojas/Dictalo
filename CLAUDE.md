@@ -4,7 +4,8 @@ App de dictado por voz para Windows (clon de Wispr Flow). 100% Python. Local, pr
 El dueño (Ivo) escribe en español → **respondé siempre en español**.
 
 > **Para retomar:** este archivo se carga solo al abrir la carpeta. Leé todo antes de tocar nada.
-> Dictalo **reemplazó** a una app vieja ("Dictation App", carpeta hermana). NO trabajes en la vieja.
+> Dictalo **reemplazó** a una app vieja ("Dictation App") que ya **se eliminó**. Dictalo es 100% autónomo:
+> tiene su propio `.venv`, su propio repo git y todo el código en esta carpeta.
 
 ## Qué hace
 Tap **F9** → grabás (aparece un overlay flotante con el espectro de tu voz) → tap **F9** de nuevo →
@@ -12,15 +13,15 @@ Whisper transcribe local en GPU → **pega el texto en el campo donde estás** (
 siempre en 2do plano (ícono en la barra), arranca con Windows.
 
 ## Comandos
-- **Correr en dev (con consola/logs):** `"../Dictation App/.venv/Scripts/python.exe" main.py`
-- **Compilar el .exe:** `"../Dictation App/.venv/Scripts/pyinstaller.exe" dictalo.spec --noconfirm` → `dist\Dictalo\`
+- **Correr en dev (con consola/logs):** `.venv\Scripts\python.exe main.py`
+- **Compilar el .exe:** `.venv\Scripts\pyinstaller.exe dictalo.spec --noconfirm` → `dist\Dictalo\`
 - **Instalador:** `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss` → `Output\Dictalo-Setup.exe`
 - **Actualizar la instalada sin reinstalar:** después de compilar, `cp -rf dist/Dictalo/* "%LOCALAPPDATA%\Programs\Dictalo\"`
 - Cerrar la app: ícono en la barra → Salir.
 
-> ⚠️ **El venv vive en la carpeta hermana `../Dictation App/.venv`** (tiene faster-whisper, CUDA libs,
-> pyinstaller). Dictalo todavía NO tiene venv propio. Si se borra/mueve la carpeta vieja, hay que crear
-> uno acá: `py -3.14 -m venv .venv && .venv\Scripts\pip install -r requirements.txt` (baja ~2GB).
+> ⚠️ **El venv propio vive en `.venv`** (tiene faster-whisper, CUDA libs, pyinstaller). Está gitignoreado.
+> Si se borra/corrompe, recrearlo: `py -3.14 -m venv .venv && .venv\Scripts\python.exe -m pip install -r requirements.txt`
+> (baja ~2-3GB). El modelo Whisper se cachea aparte en `~/.cache/huggingface` (compartido, no se baja de nuevo).
 
 ## Arquitectura (archivos)
 ```
@@ -84,8 +85,9 @@ El asistente NO puede usar la voz ni ver la pantalla del dueño. Para validar:
 
 ## Ideas a futuro (discutidas)
 El dueño YA RECHAZÓ por ahora: limpieza con IA, modo comando, tono por app, reemplazos/snippets, preview toast.
-Le interesó y ya está hecho: punto final, idioma en/es, sensibilidad de barras, historial, doble-clic abre Ajustes.
-Posible próximo: respaldo en GitHub (no hay remoto aún), CLAUDE.md/docs (este archivo), venv propio de Dictalo.
+Le interesó y ya está hecho: punto final + espacio al final, idioma en/es, sensibilidad de barras, historial,
+doble-clic abre Ajustes, CLAUDE.md/docs, venv propio de Dictalo (la carpeta vieja ya se eliminó).
+Posible próximo: respaldo en GitHub (no hay remoto aún).
 
 ## Convenciones
 - Responder siempre en español. Mensajes de usuario en la app, en español.

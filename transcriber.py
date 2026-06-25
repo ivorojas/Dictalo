@@ -26,12 +26,15 @@ def _register_cuda_dlls():
 _register_cuda_dlls()
 
 
-def _ensure_period(text: str) -> str:
-    """Cierra con punto final, salvo que ya termine en un signo (?, !, …, etc.)."""
+def _finalize(text: str) -> str:
+    """Cierra con punto final (salvo que ya termine en un signo: ?, !, …, etc.) y
+    deja un espacio al final, así dictados consecutivos quedan separados al pegar."""
     text = text.strip()
-    if text and text[-1].isalnum():
+    if not text:
+        return text
+    if text[-1].isalnum():
         text += "."
-    return text
+    return text + " "
 
 
 class Transcriber:
@@ -66,7 +69,7 @@ class Transcriber:
             vad_parameters={"min_silence_duration_ms": 300},
         )
         text = " ".join(s.text for s in segments).strip()
-        return _ensure_period(text)
+        return _finalize(text)
 
     def _detect_es_en(self, audio):
         """Detecta SOLO entre español e inglés (evita mis-detección a idiomas

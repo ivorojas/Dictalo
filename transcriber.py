@@ -1,9 +1,12 @@
 """STT local con faster-whisper en CUDA."""
 import os
+import re
 import sys
 from pathlib import Path
 
 import numpy as np
+
+_WS = re.compile(r"\s+")
 
 
 def _register_cuda_dlls():
@@ -27,9 +30,11 @@ _register_cuda_dlls()
 
 
 def _finalize(text: str) -> str:
-    """Cierra con punto final (salvo que ya termine en un signo: ?, !, …, etc.) y
-    deja un espacio al final, así dictados consecutivos quedan separados al pegar."""
-    text = text.strip()
+    """Normaliza espacios (junta saltos/tabs/espacios dobles en uno solo — los
+    segmentos de Whisper traen espacio propio y al unirlos quedan dobles), cierra
+    con punto final (salvo que ya termine en un signo: ?, !, …, etc.) y deja un
+    espacio al final, así dictados consecutivos quedan separados al pegar."""
+    text = _WS.sub(" ", text).strip()
     if not text:
         return text
     if text[-1].isalnum():

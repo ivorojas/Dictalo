@@ -1,0 +1,15 @@
+# Artefactos de compilación (la app empaquetada, NO código)
+build/
+dist/
+Output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Secrets / datos locales
+.env
+*.log

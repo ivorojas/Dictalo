@@ -86,8 +86,8 @@ El asistente NO puede usar la voz ni ver la pantalla del dueño. Para validar:
 ## Ideas a futuro (discutidas)
 El dueño YA RECHAZÓ por ahora: limpieza con IA, modo comando, tono por app, reemplazos/snippets, preview toast.
 Le interesó y ya está hecho: punto final + espacio al final, idioma en/es, sensibilidad de barras, historial,
-doble-clic abre Ajustes, CLAUDE.md/docs, venv propio de Dictalo (la carpeta vieja ya se eliminó).
-Posible próximo: respaldo en GitHub (no hay remoto aún).
+doble-clic abre Ajustes, CLAUDE.md/docs, venv propio de Dictalo (la carpeta vieja ya se eliminó),
+respaldo en GitHub: repo privado `ivorojas/Dictalo` (remoto `origin`, rama `master`).
 
 ## Convenciones
 - Responder siempre en español. Mensajes de usuario en la app, en español.

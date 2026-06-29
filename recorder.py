@@ -29,17 +29,34 @@ class Recorder:
         except Exception:
             pass
 
-    def start(self):
-        self.level = 0.0
-        self.bands = [0.0] * NBANDS
-        self._frames = []
-        self.is_recording = True
+    def refresh(self):
+        """Re-inicializa PortAudio. Tras suspender/resumir el device puede quedar
+        stale y abrir el stream falla; refrescar la lista lo resuelve."""
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+
+    def _open_stream(self):
         self._stream = sd.InputStream(
             samplerate=self.config.sample_rate, channels=1, dtype="float32",
             device=self.config.mic_index if self.config.mic_index >= 0 else None,
             callback=self._cb, blocksize=1024,
         )
         self._stream.start()
+
+    def start(self):
+        self.level = 0.0
+        self.bands = [0.0] * NBANDS
+        self._frames = []
+        self.is_recording = True
+        try:
+            self._open_stream()
+        except Exception as e:
+            print(f"[rec] fallo al abrir el mic ({e}); refresco audio y reintento")
+            self.refresh()
+            self._open_stream()
 
     def _cb(self, indata, frames, time_info, status):
         self._frames.append(indata.copy())

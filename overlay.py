@@ -68,6 +68,17 @@ class Overlay:
         except Exception:
             pass
 
+    def _reassert(self):
+        """Reaplica lo que Windows/DWM puede resetear tras suspender o apagar el
+        monitor (topmost, color transparente, ex-styles). Sin esto el overlay deja
+        de aparecer después de un resume aunque la app siga funcionando."""
+        try:
+            self.root.attributes("-topmost", True)
+            self.root.attributes("-transparentcolor", _CHROMA)
+        except tk.TclError:
+            pass
+        self._apply_exstyles()
+
     def _place(self):
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"{_W}x{_H}+{(sw - _W) // 2}+{sh - _H - 96}")
@@ -84,7 +95,7 @@ class Overlay:
     def _tick(self):
         want = self._state in ("recording", "processing")
         if want and not self._visible:
-            self._place(); self.root.attributes("-alpha", 0.98); self._visible = True
+            self._place(); self._reassert(); self.root.attributes("-alpha", 0.98); self._visible = True
         elif not want and self._visible:
             self.root.attributes("-alpha", 0.0); self._visible = False
         if self._visible:

@@ -8,16 +8,26 @@ import ctypes
 import os
 import sys
 import threading
+import time
 import winsound
+from datetime import datetime
 
 
 def _setup_stdio():
     """Sin consola (app .exe) sys.stdout es None → cualquier print mata la app.
-    Mandamos todo a un log."""
+    Mandamos todo a un log. Append (no se trunca) para conservar evidencia entre
+    reinicios — clave para diagnosticar fallas tras suspender; con un tope de
+    tamaño para que no crezca sin límite."""
     if sys.stdout is None or sys.stderr is None:
         d = os.path.join(os.path.expanduser("~"), ".dictalo")
         os.makedirs(d, exist_ok=True)
-        f = open(os.path.join(d, "dictalo.log"), "w", encoding="utf-8", buffering=1)
+        p = os.path.join(d, "dictalo.log")
+        try:
+            if os.path.getsize(p) > 2_000_000:
+                os.replace(p, p + ".old")
+        except OSError:
+            pass
+        f = open(p, "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr = f
     else:
         for s in (sys.stdout, sys.stderr):
@@ -70,7 +80,7 @@ def main():
 
     config = Config()
     print("=" * 40)
-    print("  Dictalo")
+    print(f"  Dictalo — inicio {datetime.now():%Y-%m-%d %H:%M:%S}")
     print(f"  Atajo: {config.hotkey_display}  | Cleanup: {'ON' if config.cleanup_enabled else 'OFF'}")
     print("=" * 40)
 
@@ -146,14 +156,48 @@ def main():
                 return
             _target["hwnd"] = capture_foreground()   # tu ventana, antes del overlay
             print(f"[rec] grabando (target={_target['hwnd']})")
+            try:
+                recorder.start()
+            except Exception as e:
+                print(f"[rec] no pude abrir el micrófono: {e}")
+                sounds.error()
+                return
             sounds.start()
             overlay.set_state("recording")
             set_rec_icon(True)
-            recorder.start()
 
-    listener = kb.GlobalHotKeys({config.hotkey: on_toggle})
-    listener.daemon = True
-    listener.start()
+    _hk = {"listener": None}
+
+    def _arm_hotkey():
+        old = _hk["listener"]
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        lst = kb.GlobalHotKeys({config.hotkey: on_toggle})
+        lst.daemon = True
+        lst.start()
+        _hk["listener"] = lst
+
+    _arm_hotkey()
+
+    def _watchdog():
+        """Tras suspender/resumir, Windows da de baja el hook de teclado de pynput
+        (F9 deja de responder) y el device de audio puede quedar stale. Detectamos
+        el resume por el salto del reloj y re-armamos el hotkey + refrescamos audio."""
+        last = time.time()
+        while True:
+            time.sleep(5)
+            now = time.time()
+            gap = now - last
+            last = now
+            if gap > 30:   # salto grande = la PC estuvo suspendida
+                print(f"[watchdog] resume detectado (gap {gap:.0f}s) — re-armo hotkey + refresco audio")
+                _arm_hotkey()
+                if not recorder.is_recording:
+                    recorder.refresh()
+    threading.Thread(target=_watchdog, daemon=True).start()
 
     def do_settings(icon, item):
         overlay.root.after(0, lambda: open_settings(overlay.root, config))

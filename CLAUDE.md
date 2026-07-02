@@ -85,9 +85,14 @@ El asistente NO puede usar la voz ni ver la pantalla del dueño. Para validar:
 
 ## Ideas a futuro (discutidas)
 El dueño YA RECHAZÓ por ahora: limpieza con IA, modo comando, tono por app, reemplazos/snippets, preview toast.
-Le interesó y ya está hecho: punto final + espacio al final, idioma en/es, sensibilidad de barras, historial,
-doble-clic abre Ajustes, CLAUDE.md/docs, venv propio de Dictalo (la carpeta vieja ya se eliminó),
-respaldo en GitHub: repo privado `ivorojas/Dictalo` (remoto `origin`, rama `master`).
+Le interesó y ya está hecho: punto final + espacio al final, normalización de espacios del transcript,
+idioma en/es, sensibilidad de barras, historial, doble-clic abre Ajustes, CLAUDE.md/docs, venv propio
+(la carpeta vieja ya se eliminó), resiliencia ante suspensión/resume (watchdog re-arma el hotkey + refresh
+de audio + overlay reaplica estilos al mostrarse; log en modo append), y **publicación**: repo **PÚBLICO**
+`ivorojas/Dictalo` con README (inglés) + imágenes del overlay (`assets/`, se generan con `assets/render.py`)
++ release v1.0.0 (instalador ~1GB con CUDA). Licencia MIT.
+Roadmap público (en README): aceleración GPU AMD/Intel (whisper.cpp+Vulkan), port a macOS. Mac se sacó del
+README a pedido (hoy es Windows-only; en AMD/sin-NVIDIA corre pero en CPU vía el fallback de transcriber).
 
 ## Convenciones
 - Responder siempre en español. Mensajes de usuario en la app, en español.

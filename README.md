@@ -65,6 +65,18 @@ The overlay floats on top, is click-through, and never steals focus — so the p
 - **Double-click the tray icon** to open **Settings**: microphone, hotkey, custom vocabulary, and backup history.
 - Quit from the tray icon → **Salir**.
 
+## Settings
+
+Double-click the tray icon to open **Settings** — pick your microphone and hotkey, edit your
+**custom vocabulary** (applied instantly, no restart), and recover recent dictations from the
+**backup history** if a paste ever misses.
+
+<p align="center">
+  <img src="assets/settings.png" width="440" alt="Dictalo settings window (dark theme): microphone, hotkey, vocabulary and backup history">
+</p>
+
+> The screenshot uses sample data.
+
 ## Build from source
 
 Requires **Python 3.14** (64-bit) and an NVIDIA GPU for the CUDA path.

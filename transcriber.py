@@ -2,11 +2,13 @@
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 
 _WS = re.compile(r"\s+")
+_TAIL_PAD_S = 0.5   # colchón de silencio al final (anti-alucinación al cortar en seco)
 
 
 def _register_cuda_dlls():
@@ -61,9 +63,16 @@ class Transcriber:
         list(self._model.transcribe(silence, language=self.config.whisper_language or None)[0])
 
     def transcribe(self, audio: np.ndarray) -> str:
+        sr = self.config.sample_rate
         lang = self.config.whisper_language or None
         if lang is None:
             lang = self._detect_es_en(audio)   # restringe la detección a en/es
+        # Colchón de silencio al final: si cortás el dictado justo al terminar de
+        # hablar, el audio queda sin cierre y Whisper "completa"/alucina el final.
+        # Este silencio le da un cierre limpio (y el speech_pad del VAD tiene de
+        # dónde agarrarse). Es silencio → decodifica en milisegundos.
+        audio = np.concatenate([audio, np.zeros(int(_TAIL_PAD_S * sr), dtype=np.float32)])
+        t0 = time.perf_counter()
         segments, _ = self._model.transcribe(
             audio,
             language=lang,
@@ -74,6 +83,7 @@ class Transcriber:
             vad_parameters={"min_silence_duration_ms": 300},
         )
         text = " ".join(s.text for s in segments).strip()
+        print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
         return _finalize(text)
 
     def _detect_es_en(self, audio):

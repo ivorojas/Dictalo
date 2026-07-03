@@ -10,6 +10,39 @@ import numpy as np
 _WS = re.compile(r"\s+")
 _TAIL_PAD_S = 0.5   # colchón de silencio al final (anti-alucinación al cortar en seco)
 
+# Whisper, entrenado con subtítulos, alucina créditos de subtitulado sobre el
+# silencio (típico al final): "Closed Captions by Red Bee Media", "Gracias por ver
+# el video", etc. Esta lista negra los recorta del final. Frases DISTINTIVAS para no
+# pisar texto real (p.ej. NO filtramos "subscribe" solo, que aparece en código).
+_HALLU_END = re.compile(
+    r"""(?ix)                         # ignorecase + verbose
+    [\s.,!¡]*                         # separadores/puntuación previa
+    (?:
+        closed\ captions?\ by\ red\ bee\ media
+      | subtitl(?:es|ing)\ by\ red\ bee\ media
+      | subtitles\ by\ the\ amara\.org\ community
+      | subt[ií]tulos(?:\ realizados)?\ por\ la\ comunidad\ de\ amara\.org
+      | thanks?\ for\ watching
+      | thank\ you\ for\ watching
+      | please\ subscribe(?:\ to\ [^.!¡]*)?
+      | like\ and\ subscribe
+      | gracias\ por\ ver(?:\ el)?(?:\ v[ií]deo)?
+      | [¡!]*\s*suscr[ií]bete
+    )
+    [\s.,!¡]*$                        # hasta el final del texto
+    """
+)
+
+
+def _strip_hallucinations(text: str) -> str:
+    """Recorta del final los créditos de subtitulado que Whisper alucina sobre el
+    silencio. Itera por si quedan varios apilados."""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _HALLU_END.sub("", text).strip()
+    return text
+
 
 def _register_cuda_dlls():
     """Registra las DLLs CUDA (cuBLAS/cuDNN) de los wheels nvidia-*-cu12 en el DLL
@@ -83,8 +116,11 @@ class Transcriber:
             vad_parameters={"min_silence_duration_ms": 300},
         )
         text = " ".join(s.text for s in segments).strip()
+        clean = _strip_hallucinations(text)
+        if clean != text:
+            print(f"[stt] alucinación de subtítulos filtrada del final")
         print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
-        return _finalize(text)
+        return _finalize(clean)
 
     def _detect_es_en(self, audio):
         """Detecta SOLO entre español e inglés (evita mis-detección a idiomas

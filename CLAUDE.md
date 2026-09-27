@@ -51,9 +51,20 @@ icono.ico      — ícono verde-agua.
 - **Inyección = clipboard + Ctrl+V con SCAN CODES**: las apps Chromium/Electron (Claude, Slack, navegador)
   **ignoran teclas sintéticas sin scan code**. `_ki()` setea `wScan = MapVirtualKey(vk)`. El texto se mete al
   clipboard, se manda Ctrl+V, y el clipboard se restaura **en 2do plano** (para no demorar el sonido/overlay).
-- **Foco**: `capture_foreground()` guarda tu ventana al apretar F9 (excluye ventanas propias de Dictalo).
-  `_focus_window()` se la devuelve antes de pegar, con `ForegroundLockTimeout=0` + ALT-tap + `AttachThreadInput`
-  (Windows bloquea `SetForegroundWindow` desde un proceso de fondo). Guarda: nunca pega en ventana propia.
+- **Foco / destino del pegado**: se pega en la ventana en foco **al CORTAR** (F9 final), no la del inicio
+  (el dueño lo pidió: clic en otro campo durante el dictado → pega ahí). La del inicio es solo fallback.
+  `capture_foreground()` excluye ventanas propias y escritorio/barra de tareas. `_focus_window()` solo actúa si
+  el foco cambió durante la transcripción (`ForegroundLockTimeout=0` + ALT-tap + `AttachThreadInput`).
+- **Hotkey = hook LL de Windows**: pynput llama al callback DENTRO del hook. Nada lento ahí (abrir el mic de
+  la interfaz USB tarda) ni excepciones: Windows da de baja el hook en silencio / pynput frena el listener →
+  F9 muerto. Por eso el hook solo hace `_toggles.put()` y `_toggle_worker` procesa en otro hilo.
+- **Mic = interfaz USB Focusrite** ("Analogue 1 + 2"): a veces entrega **silencio digital** (tras suspender,
+  si otra app toma el dispositivo). Síntoma en el log: `[stt] proceso 0.01s` con audio de varios segundos y
+  `[stt] ''`. Ahora: `pico < 1e-5` → refresh de PortAudio + sonido de error + notificación; aviso a los 3s si
+  sigue muerto; si el VAD descarta todo, reintento con VAD sensible (threshold 0.25). El log registra
+  pico/RMS y nombre del mic por dictado.
+- **Portapapeles**: `OpenClipboard` se reintenta (otra app puede tenerlo tomado); si falla, no se pega y se
+  avisa (el texto queda en Historial). Se restaura a 1s (apps lentas leían tarde y pegaban lo viejo).
 - **ctypes 64-bit**: TODA llamada Win32 que devuelve/recibe HANDLE/puntero lleva `restype`/`argtypes`
   explícitos. Sin esto el puntero se trunca a 32 bits → "access violation writing 0x0".
 - **DLLs CUDA**: el wheel de ctranslate2 NO trae cuBLAS/cuDNN. Vienen de `nvidia-*-cu12` (requirements) y

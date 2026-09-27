@@ -13,6 +13,8 @@ class Recorder:
         self.is_recording = False
         self.level = 0.0
         self.bands = [0.0] * NBANDS    # espectro (FFT) en vivo, una por barra
+        self.peak = 0.0                # pico de la grabación en curso (detecta mic "muerto")
+        self.last_rms = 0.0            # RMS de la última grabación completa
         self._frames = []
         self._stream: Optional[sd.InputStream] = None
 
@@ -46,9 +48,19 @@ class Recorder:
         )
         self._stream.start()
 
+    def device_name(self):
+        try:
+            if self.config.mic_index >= 0:
+                return sd.query_devices(self.config.mic_index)["name"]
+            return sd.query_devices(kind="input")["name"]
+        except Exception:
+            return "?"
+
     def start(self):
         self.level = 0.0
         self.bands = [0.0] * NBANDS
+        self.peak = 0.0
+        self.last_rms = 0.0
         self._frames = []
         self.is_recording = True
         try:
@@ -63,6 +75,7 @@ class Recorder:
         x = indata[:, 0].astype(np.float32)
         n = len(x)
         rms = float(np.sqrt(np.mean(x ** 2)))
+        self.peak = max(self.peak, float(np.max(np.abs(x))))
         self.level = 0.55 * self.level + 0.45 * min(1.0, rms * 14)
 
         # Espectro por FFT → bandas log en el rango de voz (~80-4000Hz).
@@ -93,9 +106,14 @@ class Recorder:
         self.level = 0.0
         self.bands = [0.0] * NBANDS
         if self._stream:
-            self._stream.stop()
-            self._stream.close()
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception as e:
+                print(f"[rec] error al cerrar el stream: {e}")
             self._stream = None
         if not self._frames:
             return None
-        return np.concatenate(self._frames).flatten()
+        audio = np.concatenate(self._frames).flatten()
+        self.last_rms = float(np.sqrt(np.mean(audio ** 2)))
+        return audio

@@ -132,8 +132,18 @@ def _send_ctrl_v():
     _send_one(_ki(VK_CONTROL, up=True))
 
 
+def _open_clipboard():
+    """OpenClipboard falla si otra app (historial de Windows, gestores de
+    portapapeles, el navegador) lo tiene abierto en ese instante: reintentamos."""
+    for _ in range(25):
+        if user32.OpenClipboard(None):
+            return True
+        time.sleep(0.02)
+    return False
+
+
 def _clipboard_get():
-    if not user32.OpenClipboard(None):
+    if not _open_clipboard():
         return None
     try:
         h = user32.GetClipboardData(CF_UNICODETEXT)
@@ -156,17 +166,17 @@ def _clipboard_set(text):
     data = text.encode("utf-16-le") + b"\x00\x00"
     hMem = kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len(data))
     if not hMem:
-        return
+        return False
     p = kernel32.GlobalLock(hMem)
     if not p:
-        return
+        return False
     ctypes.memmove(p, data, len(data))
     kernel32.GlobalUnlock(hMem)
-    if not user32.OpenClipboard(None):
-        return
+    if not _open_clipboard():
+        return False
     try:
         user32.EmptyClipboard()
-        user32.SetClipboardData(CF_UNICODETEXT, hMem)
+        return bool(user32.SetClipboardData(CF_UNICODETEXT, hMem))
     finally:
         user32.CloseClipboard()
 
@@ -185,10 +195,20 @@ def _is_ours(hwnd):
     return pid.value == _OUR_PID
 
 
+_SHELL_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+
+
+def _class_name(hwnd):
+    buf = ctypes.create_unicode_buffer(128)
+    user32.GetClassNameW(hwnd, buf, 128)
+    return buf.value
+
+
 def capture_foreground():
-    """Ventana en foco AHORA, salvo que sea nuestra propia (devuelve 0 en ese caso)."""
+    """Ventana en foco AHORA. Devuelve 0 si es nuestra o si es el escritorio/barra
+    de tareas (pegar ahí nunca es lo que querés)."""
     fg = user32.GetForegroundWindow()
-    if not fg or _is_ours(fg):
+    if not fg or _is_ours(fg) or _class_name(fg) in _SHELL_CLASSES:
         return 0
     return fg
 
@@ -216,9 +236,10 @@ def _focus_window(hwnd):
 class Injector:
     def inject(self, text: str, target_hwnd=0):
         if not text:
-            return
-        # Recuperá el foco a la ventana donde arrancaste el dictado (por si el
-        # overlay u otra cosa lo tapó), pero nunca a una ventana nuestra.
+            return False
+        # target_hwnd = la ventana donde estabas AL CORTAR (F9). Normalmente ya tiene
+        # el foco y no se toca nada; solo se re-enfoca si cambió durante la
+        # transcripción. Nunca a una ventana nuestra.
         if target_hwnd and not _is_ours(target_hwnd):
             _focus_window(target_hwnd)
             time.sleep(0.12)
@@ -227,17 +248,21 @@ class Injector:
         print(f"[inject] destino hwnd={fg} {_win_info(fg)}")
         if _is_ours(fg):
             print("[inject] ABORTADO: el foco quedó en una ventana de Dictalo")
-            return
+            return False
 
         old = _clipboard_get()
-        _clipboard_set(text)
+        if not _clipboard_set(text):
+            print("[inject] ABORTADO: no pude escribir el portapapeles (otra app lo tenía tomado)")
+            return False
         time.sleep(0.05)
         _send_ctrl_v()                       # ← acá pega; inject() vuelve enseguida
         print(f"[inject] Ctrl+V enviado ({len(text)} chars)")
-        # Restaurar el clipboard en 2do plano: NO bloquea el sonido/overlay de fin,
-        # que ahora suenan/desaparecen apenas se pegó.
+        # Restaurar el clipboard en 2do plano: NO bloquea el sonido/overlay de fin.
+        # 1s de margen: algunas apps (Electron/navegador cargado) leen el pegado
+        # tarde y, si restaurábamos antes, pegaban lo que tenías copiado.
         if old is not None:
             def _restore():
-                time.sleep(0.5)
+                time.sleep(1.0)
                 _clipboard_set(old)
             threading.Thread(target=_restore, daemon=True).start()
+        return True

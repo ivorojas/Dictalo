@@ -106,6 +106,19 @@ class Transcriber:
         # dónde agarrarse). Es silencio → decodifica en milisegundos.
         audio = np.concatenate([audio, np.zeros(int(_TAIL_PAD_S * sr), dtype=np.float32)])
         t0 = time.perf_counter()
+        text = self._decode(audio, lang, vad_threshold=0.5)
+        if not text:
+            # El VAD descartó TODO el audio. Si había voz baja/entrecortada, un VAD
+            # más sensible la recupera; si era silencio de verdad, sigue vacío.
+            print("[stt] el VAD no encontró voz — reintento con VAD sensible")
+            text = self._decode(audio, lang, vad_threshold=0.25)
+        clean = _strip_hallucinations(text)
+        if clean != text:
+            print(f"[stt] alucinación de subtítulos filtrada del final")
+        print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
+        return _finalize(clean)
+
+    def _decode(self, audio, lang, vad_threshold):
         segments, _ = self._model.transcribe(
             audio,
             language=lang,
@@ -113,14 +126,9 @@ class Transcriber:
             condition_on_previous_text=False,   # evita arrastrar contexto/repeticiones
             hotwords=(self.config.vocabulary or None),   # sesga hacia TUS términos/nombres
             vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300},
+            vad_parameters={"threshold": vad_threshold, "min_silence_duration_ms": 300},
         )
-        text = " ".join(s.text for s in segments).strip()
-        clean = _strip_hallucinations(text)
-        if clean != text:
-            print(f"[stt] alucinación de subtítulos filtrada del final")
-        print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
-        return _finalize(clean)
+        return " ".join(s.text for s in segments).strip()
 
     def _detect_es_en(self, audio):
         """Detecta SOLO entre español e inglés (evita mis-detección a idiomas

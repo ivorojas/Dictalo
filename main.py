@@ -6,6 +6,7 @@ Corre en 2do plano (tray). Ajustes desde el ícono.
 """
 import ctypes
 import os
+import queue
 import sys
 import threading
 import time
@@ -73,6 +74,9 @@ def _icon(recording=False):
     return img
 
 
+_DEAD_PEAK = 1e-5   # ≈ -100 dBFS: por debajo, el mic entregó silencio digital (stream "muerto")
+
+
 def main():
     if _already_running():
         winsound.Beep(300, 200)
@@ -112,6 +116,16 @@ def main():
             ic.icon = _icon(v)
             ic.title = "Dictalo — grabando" if v else "Dictalo"
 
+    def _notify(msg):
+        ic = _icon_ref["icon"]
+        if ic:
+            try:
+                ic.notify(msg, "Dictalo")
+            except Exception:
+                pass
+
+    _gen = {"n": 0}   # id de grabación (para que un chequeo viejo no afecte a una nueva)
+
     def on_toggle():
         if not _ready.is_set():
             sounds.wait()
@@ -119,30 +133,47 @@ def main():
             return
 
         if recorder.is_recording:
+            end_hwnd = capture_foreground()      # donde estás AL CORTAR: ahí se pega
             set_rec_icon(False)
             overlay.set_state("processing")
             audio = recorder.stop()
             n = 0 if audio is None else len(audio)
-            print(f"[rec] stop — {n / config.sample_rate:.1f}s")
+            tgt = end_hwnd or _target["hwnd"]    # si al cortar no hay ventana válida, la del inicio
+            print(f"[rec] stop — {n / config.sample_rate:.1f}s · pico {recorder.peak:.2e} "
+                  f"rms {recorder.last_rms:.4f} · pega en={tgt}")
             if audio is None or n < config.min_frames:
                 sounds.stop()
                 overlay.set_state("hidden")
                 return
+            if recorder.peak < _DEAD_PEAK:
+                # Silencio digital puro: el dispositivo (p.ej. una interfaz USB) quedó
+                # "colgado" u otra app lo tomó. Reabrimos el audio y avisamos, en vez de
+                # transcribir nada y quedar en silencio.
+                print("[rec] el micrófono entregó silencio digital — reinicio el audio")
+                recorder.refresh()
+                sounds.error()
+                _notify("El micrófono no captó audio. Ya lo reinicié: probá de nuevo.")
+                overlay.set_state("hidden")
+                return
             _busy.set()
-            tgt = _target["hwnd"]
 
             def work():
                 try:
                     raw = transcriber.transcribe(audio)
                     print(f"[stt] {raw!r}")
                     if not raw:
-                        sounds.stop()
+                        recorder.refresh()          # por si el mic quedó en mal estado
+                        sounds.error()
+                        _notify("No se entendió nada del audio. Probá de nuevo.")
                         return
                     text = cleaner.clean(raw)
                     history.add(text)               # respaldo, por si no se pega en ningún lado
-                    injector.inject(text, tgt)
-                    sounds.done()
-                    print(f"[ok] {text}")
+                    if injector.inject(text, tgt):
+                        sounds.done()
+                        print(f"[ok] {text}")
+                    else:
+                        sounds.error()
+                        _notify("No se pudo pegar. El texto quedó en Ajustes → Historial.")
                 except Exception as e:
                     print(f"[error] {e}")
                     sounds.error()
@@ -154,17 +185,50 @@ def main():
             if _busy.is_set():
                 sounds.wait()
                 return
-            _target["hwnd"] = capture_foreground()   # tu ventana, antes del overlay
-            print(f"[rec] grabando (target={_target['hwnd']})")
+            _target["hwnd"] = capture_foreground()   # respaldo por si al cortar no hay ventana válida
             try:
                 recorder.start()
             except Exception as e:
                 print(f"[rec] no pude abrir el micrófono: {e}")
                 sounds.error()
                 return
+            print(f"[rec] grabando (inicio en={_target['hwnd']}, mic={recorder.device_name()})")
             sounds.start()
             overlay.set_state("recording")
             set_rec_icon(True)
+
+            _gen["n"] += 1
+            g = _gen["n"]
+
+            def _check_mic():
+                # Aviso temprano: si a los 3s el mic sigue en silencio digital, que no
+                # hables 20s al vacío.
+                if recorder.is_recording and _gen["n"] == g and recorder.peak < _DEAD_PEAK:
+                    print("[rec] 3s sin señal del micrófono — aviso")
+                    sounds.error()
+                    _notify("El micrófono no está captando audio. Cortá (F9) y probá de nuevo.")
+            t = threading.Timer(3.0, _check_mic)
+            t.daemon = True
+            t.start()
+
+    # pynput llama al callback DENTRO del hook de teclado de Windows. Si ahí se hace
+    # algo lento (abrir el mic de una interfaz USB puede tardar cientos de ms),
+    # Windows da de baja el hook en silencio y F9 deja de andar; y si ahí se lanza
+    # una excepción, pynput detiene el listener. Por eso el hook solo encola y un
+    # hilo aparte hace el trabajo, en orden.
+    _toggles = queue.Queue()
+
+    def _toggle_worker():
+        while True:
+            _toggles.get()
+            try:
+                on_toggle()
+            except Exception as e:
+                print(f"[error] toggle: {e}")
+                sounds.error()
+                overlay.set_state("hidden")
+                set_rec_icon(False)
+    threading.Thread(target=_toggle_worker, daemon=True).start()
 
     _hk = {"listener": None}
 
@@ -175,7 +239,7 @@ def main():
                 old.stop()
             except Exception:
                 pass
-        lst = kb.GlobalHotKeys({config.hotkey: on_toggle})
+        lst = kb.GlobalHotKeys({config.hotkey: lambda: _toggles.put(1)})
         lst.daemon = True
         lst.start()
         _hk["listener"] = lst

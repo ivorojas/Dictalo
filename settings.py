@@ -199,10 +199,10 @@ class SettingsView(_Toast):
         root = tk.Frame(self.area.inner, bg=ui.BG)
         root.pack(fill="both", expand=True, padx=(28, 16), pady=(22, 20))
         self._header(root)
+        self._historial(root)      # primero: casi siempre se abre para copiar el último dictado
         self._dictado(root)
         self._ventanita(root)
         self._vocabulario(root)
-        self._historial(root)
         self._footer(root)
         self._poll()
 
@@ -398,7 +398,7 @@ class SettingsView(_Toast):
         card.pack(fill="x")
         self.hist_body = card.body
         ui.label(p, f"Los dictados se borran solos a los {history.RETENTION_DAYS} días.", F.tiny,
-                 ui.TEXT_3, bg=ui.BG).pack(anchor="w", pady=(9, 0))
+                 ui.TEXT_3, bg=ui.BG).pack(anchor="w", pady=(9, 28))
         self._render_history()
 
     def _render_history(self):
@@ -421,22 +421,40 @@ class SettingsView(_Toast):
         for i, it in enumerate(items[:PREVIEW]):
             if i:
                 ui.separator(self.hist_body).pack(fill="x")
-            self._history_row(it)
+            self._history_row(it, latest=i == 0)
 
-    def _history_row(self, item):
+    def _history_row(self, item, latest=False):
+        """El último dictado va destacado: dos líneas y un botón Copiar grande."""
         row = tk.Frame(self.hist_body, bg=ui.SURFACE)
         row.pack(fill="x", pady=10)
-        btn = ui.IconButton(row, ui.I_COPY)
-        btn.command = lambda: self._copy(item["text"], btn)
-        btn.pack(side="right", padx=(12, 0))
+        if latest:
+            btn = ui.Button(row, "Copiar", kind="primary", icon=ui.I_COPY, height=34, padx=14,
+                            font=F.small_sb)
+            btn.command = lambda: self._copy_latest(item["text"], btn)
+        else:
+            btn = ui.IconButton(row, ui.I_COPY)
+            btn.command = lambda: self._copy(item["text"], btn)
+        btn.pack(side="right", padx=(12, 0), anchor="n" if latest else "center")
         col = tk.Frame(row, bg=ui.SURFACE)
         col.pack(side="left", fill="x", expand=True)
-        txt = ui.label(col, "", F.body)
+        lines = 2 if latest else 1
+        txt = ui.label(col, "", F.body, justify="left")
         txt.pack(anchor="w", fill="x")
-        ui.label(col, f"{when(item['t'])}  ·  {words(item['text'])}", F.tiny,
-                 ui.TEXT_3).pack(anchor="w", pady=(3, 0))
+        ui.label(col, f"{'Último · ' if latest else ''}{when(item['t'])}  ·  {words(item['text'])}",
+                 F.tiny, ui.ACCENT if latest else ui.TEXT_3).pack(anchor="w", pady=(3, 0))
         col.bind("<Configure>", lambda e: txt.configure(
-            text=ui.ellipsize(item["text"], F.body, e.width - 2)))
+            wraplength=max(50, e.width - 2),
+            text=ui.ellipsize(item["text"], F.body, lines * (e.width - 2) - 70 * (lines - 1))))
+
+    def _copy_latest(self, text, btn):
+        self.ctx.copy(text)
+        btn.update_content(text="Copiado", icon=ui.I_CHECK)
+        self._toast("Copiado al portapapeles")
+
+        def back():
+            if btn.winfo_exists():
+                btn.update_content(text="Copiar", icon=ui.I_COPY)
+        btn.after(1500, back)
 
     def _copy(self, text, btn):
         self.ctx.copy(text)

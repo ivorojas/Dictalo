@@ -153,7 +153,7 @@ def sample_context():
     ]
     cfg = SimpleNamespace(
         mic_index=-1, hotkey="<f9>", hotkey_display="F9", sound_pack="suave",
-        overlay_preset="aurora", overlay_custom={}, overlay_mine=[],
+        overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
         vocabulary="Claude, GitHub, Python, React, TypeScript, Docker, Kubernetes, Figma, Notion, "
                    "Slack, Vercel, Supabase, Stripe, Tailwind, PostgreSQL, Whisper, PowerShell, "
                    "VS Code, Linear, Jira")
@@ -285,7 +285,7 @@ class SettingsView(_Toast):
         card.pack(fill="x", pady=(0, 28))
         b = card.body
         self.stage = ui.Stage(b, get_style=lambda: looks.current(self.ctx.config), height=112,
-                              fps=20)
+                              fps=24, get_intensity=self._intensity)
         self.stage.configure(cursor="hand2")
         self.stage.bind("<ButtonRelease-1>", lambda e: self._open_looks())
         self.stage.pack(fill="x")
@@ -295,6 +295,35 @@ class SettingsView(_Toast):
         self.look_name.pack(side="left")
         ui.label(row2, "Elegí un estilo o armá el tuyo", F.small, ui.TEXT_3).pack(side="right")
         self._refresh_look()
+
+        ui.separator(b).pack(fill="x", pady=18)
+        head = tk.Frame(b, bg=ui.SURFACE)
+        head.pack(fill="x")
+        ui.label(head, "Intensidad de las barras", F.body_sb).pack(side="left")
+        self.int_label = ui.label(head, "", F.small_sb, ui.ACCENT)
+        self.int_label.pack(side="right")
+        ui.label(b, "Cuánto se mueven con tu voz: mirá la vista previa mientras lo movés. "
+                    "Solo cambia cómo se ve, no cómo te entiende.", F.small, ui.TEXT_3,
+                 wraplength=440).pack(anchor="w", pady=(3, 8))
+        ui.Slider(b, self._intensity(), on_change=self._set_intensity,
+                  on_release=lambda v: self._saved()).pack(fill="x")
+        ends = tk.Frame(b, bg=ui.SURFACE)
+        ends.pack(fill="x", pady=(2, 0))
+        ui.label(ends, "Sutil", F.tiny, ui.TEXT_3).pack(side="left")
+        ui.label(ends, "Exagerada", F.tiny, ui.TEXT_3).pack(side="right")
+        self._show_intensity()
+
+    def _intensity(self):
+        return getattr(self.ctx.config, "bar_intensity", looks.DEFAULT_INTENSITY)
+
+    def _set_intensity(self, v):
+        self.ctx.config.bar_intensity = round(v, 2)     # en vivo; se guarda al soltar
+        self._show_intensity()
+
+    def _show_intensity(self):
+        v = self._intensity()
+        word = "Sutil" if v < 0.25 else "Media" if v < 0.5 else "Alta" if v < 0.8 else "Muy alta"
+        self.int_label.configure(text=f"{word} · {round(v * 100)}%")
 
     def _refresh_look(self):
         if self.look_name.winfo_exists():
@@ -570,7 +599,9 @@ class LooksView(_Toast):
         ui.label(top, "Ventanita de grabación", F.title, bg=ui.BG).pack(anchor="w")
         ui.label(top, "Elegí un estilo o armá el tuyo pieza por pieza. Se guarda solo.",
                  F.small, ui.TEXT_2, bg=ui.BG).pack(anchor="w", pady=(4, 14))
-        self.stage = ui.Stage(top, get_style=self._stage_style, height=150, bg=ui.BG, fps=30)
+        self.stage = ui.Stage(top, get_style=self._stage_style, height=150, bg=ui.BG, fps=30,
+                              get_intensity=lambda: getattr(ctx.config, "bar_intensity",
+                                                            looks.DEFAULT_INTENSITY))
         self.stage.pack(fill="x")
         bar = tk.Frame(top, bg=ui.BG)
         bar.pack(fill="x", pady=(14, 0))

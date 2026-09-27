@@ -753,6 +753,59 @@ class Swatches(Flow):
         self.on_change(color)
 
 
+class Slider(tk.Canvas):
+    """Deslizador 0..1: pista redondeada, relleno con el degradé de la marca y perilla.
+    on_change mientras se arrastra (en vivo); on_release al soltar (para guardar)."""
+
+    H, KNOB = 30, 20
+
+    def __init__(self, parent, value, on_change, on_release=None, bg=SURFACE):
+        super().__init__(parent, height=self.H, bg=bg, highlightthickness=0, bd=0, cursor="hand2")
+        self.value = max(0.0, min(1.0, float(value)))
+        self.on_change, self.on_release = on_change, on_release
+        self._imgs, self._hover = {}, False
+        self._track = self.create_image(0, 0, anchor="w")
+        self._fill = self.create_image(0, 0, anchor="w")
+        self._knob = self.create_image(0, 0)
+        self.bind("<Configure>", lambda e: self._paint())
+        self.bind("<Button-1>", self._drag)
+        self.bind("<B1-Motion>", self._drag)
+        self.bind("<ButtonRelease-1>", lambda e: self.on_release and self.on_release(self.value))
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+
+    def _ends(self):
+        pad = self.KNOB // 2 + 2
+        return pad, max(pad + 1, self.winfo_width() - pad)
+
+    def _paint(self):
+        if self.winfo_width() < 30:
+            return
+        x0, x1 = self._ends()
+        cy, tw = self.H / 2, x1 - x0
+        self._imgs["track"] = shape(tw, 6, 3, fill=FIELD_HI)
+        self._imgs["fill"] = shape(max(6, round(tw * self.value)), 6, 3, grad=(CYAN, VIOLET))
+        k = self.KNOB + (2 if self._hover else 0)
+        self._imgs["knob"] = shape(k, k, k // 2, fill="#ffffff", border=mix(VIOLET, "#ffffff", 0.3),
+                                   bw=2)
+        for item, key, x in ((self._track, "track", x0), (self._fill, "fill", x0),
+                             (self._knob, "knob", x0 + tw * self.value)):
+            self.itemconfigure(item, image=self._imgs[key])
+            self.coords(item, x, cy)
+
+    def _drag(self, e):
+        x0, x1 = self._ends()
+        v = max(0.0, min(1.0, (e.x - x0) / max(1, x1 - x0)))
+        if abs(v - self.value) > 0.004:
+            self.value = v
+            self._paint()
+            self.on_change(v)
+
+    def _set_hover(self, on):
+        self._hover = on
+        self._paint()
+
+
 _walls = {}
 
 
@@ -785,9 +838,11 @@ class Stage(tk.Canvas):
     """Vista previa animada de la ventanita (voz simulada) sobre un fondo tipo
     escritorio. Solo dibuja mientras está visible y no pausada."""
 
-    def __init__(self, parent, get_style, height=130, bg=SURFACE, fps=25, radius=12):
+    def __init__(self, parent, get_style, height=130, bg=SURFACE, fps=25, radius=12,
+                 get_intensity=None):
         super().__init__(parent, height=height, bg=bg, highlightthickness=0, bd=0)
         self.get_style, self.state, self.paused = get_style, "recording", False
+        self.get_intensity = get_intensity    # si está: voz realista + la exageración elegida
         self._bg, self._r, self._ms = bg, radius, int(1000 / fps)
         self._photo = None
         self._item = self.create_image(0, 0, anchor="nw")
@@ -811,11 +866,15 @@ class Stage(tk.Canvas):
         t = time.perf_counter() - self._t0
         s = self.get_style()
         n = s["bar_count"]
-        target = looks.fake_levels(n, t) if self.state == "recording" else [0.0] * n
+        if self.state != "recording":
+            target = [0.0] * n
+        elif self.get_intensity:
+            target = looks.exaggerate(looks.fake_bands(n, t), self.get_intensity())
+        else:
+            target = looks.fake_levels(n, t)
         if len(self._bars) != n:
             self._bars = [0.0] * n
-        k = looks.SPEED[s["speed"]]
-        self._bars = [b + (x - b) * k for b, x in zip(self._bars, target)]
+        self._bars = looks.follow(self._bars, target, s["speed"])
         frame = looks.render(s, self.state, self._bars, t)
         sc = min(1.0, (w - 16) / frame.width, (h - 4) / frame.height)
         if sc < 1:

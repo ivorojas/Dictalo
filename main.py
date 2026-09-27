@@ -128,6 +128,7 @@ def main():
     overlay = Overlay()
     overlay.get_bands = lambda: recorder.bands   # barras = espectro real de tu voz
     overlay.get_style = lambda: looks.current(config)   # estilo elegido en Ajustes
+    overlay.get_intensity = lambda: config.bar_intensity
     sounds.set_pack(config.sound_pack)
     ui.init(overlay.root)
 

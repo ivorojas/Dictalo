@@ -105,6 +105,11 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
 - **Estilos de la ventanita**: config guarda `overlay_preset` ("aurora"…, "custom" o "mine:<nombre>"),
   `overlay_custom` y `overlay_mine`; `looks.current(config)` devuelve el estilo resuelto. `looks.resolve`
   descarta valores inválidos (un prefs.json viejo o editado a mano nunca rompe el overlay).
+- **Movimiento de las barras (solo visual)**: bandas del mic → `looks.resample` → `looks.exaggerate`
+  (curva gain+gamma según `config.bar_intensity`, 0.8 por defecto, deslizador en Ajustes) → `looks.follow`
+  (suben rápido, bajan suave). El silencio sigue quieto (0 → 0). Las barras usan hasta ~78% del alto y está
+  verificado que nunca se salen de la forma (648 combinaciones al 100%). El dueño NO quiere tocar la
+  ganancia de audio/transcripción: lo que se exagera es solo lo visual.
 - **Crear el Tk root activa la ventana un instante** (aunque se retire enseguida): pasa al arrancar la app (ok)
   y en autotests/capturas → ahí se devuelve el foco en el acto (`ui.restore_foreground`).
 - **Arranque instantáneo**: el modelo carga + warmup del mic en un hilo de fondo; el tray aparece al toque.

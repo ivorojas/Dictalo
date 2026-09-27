@@ -62,6 +62,7 @@ class Config:
     overlay_preset: str = "aurora"
     overlay_custom: dict = field(default_factory=dict)
     overlay_mine: list = field(default_factory=list)
+    bar_intensity: float = 0.8     # cuánto se exagera el movimiento de las barras (0-1, solo visual)
 
     # Sonidos: pack elegido (ver sounds.PACKS)
     sound_pack: str = "suave"

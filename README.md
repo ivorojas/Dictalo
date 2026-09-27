@@ -85,6 +85,8 @@ glow and "no background" styles look right on top of anything.
 - **Recording dot**: halo, dot, ring, microphone or none, any color, with a heartbeat, blink or still
 - **Voice bars**: rounded, square, dots, wave, mirror or retro blocks; 8 to 28 bars; thin to thick;
   gradient, single color, rainbow or **animated rainbow**; optional glow; smooth to snappy motion
+- **Bar intensity**: a slider for how exaggerated the bars react to your voice (high by default, so even a
+  quiet or distant voice is clearly visible). It only changes the visuals, never the transcription
 - **While transcribing**: dots, orbit, wave or progress bar
 - **Position**: bottom or top of the screen
 - **Sounds**: Soft, Bubble, Digital, Bell or silent

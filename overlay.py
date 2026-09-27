@@ -159,6 +159,7 @@ class Overlay:
         self.root.withdraw()
         self.get_bands = None                   # callable → bandas del micrófono (0-1)
         self.get_style = lambda: looks.resolve({})
+        self.get_intensity = lambda: looks.DEFAULT_INTENSITY   # exageración visual 0-1
         self._state = "hidden"
         self._bars = []
         self._t0 = time.perf_counter()
@@ -192,12 +193,11 @@ class Overlay:
         s = self.get_style()
         n = s["bar_count"]
         if self._state == "recording" and self.get_bands:
-            target = looks.resample(self.get_bands(), n)
+            target = looks.exaggerate(looks.resample(self.get_bands(), n), self.get_intensity())
         else:
             target = [0.0] * n
         if len(self._bars) != n:
             self._bars = [0.0] * n
-        k = looks.SPEED[s["speed"]]
-        self._bars = [b + (max(0.0, min(1.0, x)) - b) * k for b, x in zip(self._bars, target)]
+        self._bars = looks.follow(self._bars, target, s["speed"])
         img = looks.render(s, self._state, self._bars, time.perf_counter() - self._t0)
         self._win.show(img, *_position(img.size, s["position"]))

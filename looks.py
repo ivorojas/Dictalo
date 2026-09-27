@@ -78,6 +78,7 @@ PRESETS = [
 ]
 PRESET_IDS = [p[0] for p in PRESETS]
 SPEED = {"smooth": 0.3, "normal": 0.6, "snappy": 0.9}
+DEFAULT_INTENSITY = 0.8   # exageración visual por defecto (Ajustes → Intensidad de las barras)
 MARGIN = 22
 _BG_ALPHA = {"solid": 250, "glass": 176, "none": 0}
 _SIZES = {"small": (44, 4, 5, 36), "normal": (56, 5, 7, 44), "large": (68, 6, 8, 52)}
@@ -177,9 +178,44 @@ def resample(bands, n):
     return np.interp(np.linspace(0, len(b) - 1, n), np.arange(len(b)), b).tolist()
 
 
+def exaggerate(levels, amount):
+    """Curva visual de las barras. amount 0..1: 0 = tal como llega del micrófono;
+    1 = muy exagerada (lo bajo se levanta mucho y lo alto llega al tope seguido).
+    Solo cambia cómo se VE: la transcripción usa el audio tal cual."""
+    try:
+        a = max(0.0, min(1.0, float(amount)))
+    except (TypeError, ValueError):
+        a = DEFAULT_INTENSITY
+    gain, gamma = 1 + 2.2 * a, 1 / (1 + 1.2 * a)
+    return [min(1.0, (max(0.0, v) * gain) ** gamma) for v in levels]
+
+
+def follow(bars, target, speed):
+    """Acerca las barras al objetivo: suben rápido y bajan más suave (se ven vivas)."""
+    k = SPEED.get(speed, 0.6)
+    up, down = min(1.0, k * 1.6), k * 0.7
+    return [b + (x - b) * (up if x > b else down) for b, x in zip(bars, target)]
+
+
+def fake_bands(n, t):
+    """Como las bandas reales del micrófono (espectro de voz: casi todo bajo y un par
+    de bandas fuertes). La vista previa las pasa por exaggerate() para mostrar el
+    efecto de la intensidad elegida."""
+    env = max(0.0, 0.5 * math.sin(t * 2.3) + 0.32 * math.sin(t * 5.1) + 0.28)
+    loud = min(1.0, env * 1.1)
+    out = []
+    for i in range(n):
+        f = i / max(1, n - 1)
+        shape = (math.exp(-((f - 0.22) / 0.16) ** 2)
+                 + 0.4 * math.exp(-((f - 0.55) / 0.12) ** 2) + 0.06)
+        wob = 0.5 + 0.5 * math.sin(t * 9.0 + i * 1.7) * math.cos(t * 4.3 + i * 0.9)
+        out.append(min(1.0, loud * shape * (0.45 + 0.55 * wob)))
+    return out
+
+
 def fake_levels(n, t):
     """Niveles que parecen voz (sílabas con pausas, más energía en graves-medios),
-    para las vistas previas."""
+    para las miniaturas de la galería."""
     env = max(0.0, 0.55 * math.sin(t * 2.3) + 0.35 * math.sin(t * 5.1) + 0.3)
     out = []
     for i in range(n):
@@ -316,7 +352,7 @@ def _bars(img, d, s, g, levels, t, S):
     if s["bars"] == "wave":
         return _wave(img, s, g, levels, t, S)
     cols = bar_colors(s, n, t)
-    maxh, minh = g["h"] * 0.66 * S, bw
+    maxh, minh = g["h"] * 0.78 * S, bw          # 78% del alto: margen para no salirse nunca
     for i in range(n):
         lv = max(0.0, min(1.0, levels[i] if i < len(levels) else 0.0))
         x = x0 + i * (bw + gap)
@@ -333,14 +369,14 @@ def _bars(img, d, s, g, levels, t, S):
                 y = cy + (j - (lit - 1) / 2) * step
                 d.ellipse([x, y - bw / 2, x + bw, y + bw / 2], fill=c)
         elif s["bars"] == "mirror":
-            base = (MARGIN + g["h"] * 0.64) * S
-            h = minh + lv * (g["h"] * 0.46 * S - minh)
+            base = (MARGIN + g["h"] * 0.62) * S
+            h = minh + lv * (g["h"] * 0.52 * S - minh)
             d.rounded_rectangle([x, base - h, x + bw, base], radius=bw / 2, fill=c)
             d.rounded_rectangle([x, base + 1.5 * S, x + bw, base + 1.5 * S + h * 0.42],
                                 radius=bw / 2, fill=_rgba(cols[i], 64))
         else:   # blocks (vúmetro retro)
             sq, gb = bw, max(S, bw * 0.34)
-            slots = max(3, int(g["h"] * 0.7 * S / (sq + gb)))
+            slots = max(3, int(g["h"] * 0.8 * S / (sq + gb)))
             lit = max(1, round(lv * slots))
             base = cy + slots * (sq + gb) / 2
             for j in range(lit):
@@ -353,7 +389,7 @@ def _bars(img, d, s, g, levels, t, S):
 def _wave(img, s, g, levels, t, S):
     n = len(levels)
     x0, cy = (MARGIN + g["left"]) * S, (MARGIN + g["h"] / 2) * S
-    width, amp = g["bars_w"] * S, g["h"] * 0.34 * S
+    width, amp = g["bars_w"] * S, g["h"] * 0.4 * S
     xf = np.linspace(0, 1, max(2, n) * 10)
     y = np.interp(xf, np.linspace(0, 1, max(2, n)), (list(levels) + [0, 0])[:max(2, n)])
     y = np.convolve(y, np.ones(9) / 9, mode="same")

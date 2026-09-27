@@ -70,6 +70,7 @@ from pynput import keyboard as kb
 
 import sounds
 import history
+import looks
 import ui
 from brand import APP_NAME, __version__, make_tray_icon
 from config import Config
@@ -88,8 +89,11 @@ def _selftest_ui():
     import tkinter as tk
     import traceback
     from settings import selftest
+    fg = ui.foreground()
     root = tk.Tk()
     root.withdraw()
+    root.update_idletasks()
+    ui.restore_foreground(fg)          # crear el root lo activa un instante
     try:
         selftest(root)
         print("[selftest] interfaz OK")
@@ -98,6 +102,7 @@ def _selftest_ui():
         print(f"[selftest] FALLÓ: {e}")
     finally:
         root.destroy()
+        ui.restore_foreground(fg)
 
 
 _DEAD_PEAK = 1e-5   # ≈ -100 dBFS: por debajo, el mic entregó silencio digital (stream "muerto")
@@ -122,6 +127,8 @@ def main():
     injector = Injector()
     overlay = Overlay()
     overlay.get_bands = lambda: recorder.bands   # barras = espectro real de tu voz
+    overlay.get_style = lambda: looks.current(config)   # estilo elegido en Ajustes
+    sounds.set_pack(config.sound_pack)
     ui.init(overlay.root)
 
     _busy = threading.Event()

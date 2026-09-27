@@ -1,7 +1,8 @@
-"""Sonidos suaves y breves (sintetizados con numpy, sin librerías externas).
+"""Sonidos breves sintetizados con numpy (sin archivos ni librerías externas).
 
-Reemplazan a winsound.Beep (que es un cuadrado seco). Cada sonido es una mezcla
-de senoidales con envolvente suave (ataque corto + decay) → sin clicks, agradable.
+Hay varios packs para elegir en Ajustes. Cada sonido es una mezcla de senoidales
+con envolvente suave (ataque corto + decay) → sin clicks. "Silencio" no suena nada
+(los avisos de error igual aparecen como notificación).
 """
 import numpy as np
 
@@ -11,6 +12,13 @@ except Exception:
     sd = None
 
 _SR = 44100
+
+PACKS = [("suave", "Suave"), ("burbuja", "Burbuja"), ("digital", "Digital"),
+         ("campana", "Campana"), ("silencio", "Silencio")]
+
+
+def _t(dur):
+    return np.linspace(0, dur, int(_SR * dur), endpoint=False, dtype=np.float32)
 
 
 def _env(n, attack=0.008, decay=3.2):
@@ -23,40 +31,104 @@ def _env(n, attack=0.008, decay=3.2):
 
 
 def _note(freq, dur, vol=0.22, harm=0.25):
-    t = np.linspace(0, dur, int(_SR * dur), endpoint=False, dtype=np.float32)
+    t = _t(dur)
     w = np.sin(2 * np.pi * freq * t) + harm * np.sin(2 * np.pi * 2 * freq * t)
     return (w / (1 + harm)) * _env(len(t)) * vol
 
 
-def _seq(*notes):
-    return np.concatenate(notes).astype(np.float32)
+def _chirp(f0, f1, dur, vol=0.17):
+    """Barrido de frecuencia (efecto burbuja)."""
+    t = _t(dur)
+    phase = 2 * np.pi * (f0 * t + (f1 - f0) * t * t / (2 * dur))
+    return np.sin(phase) * _env(len(t), attack=0.004, decay=4.0) * vol
 
 
-def _silence(dur):
+def _beep(freq, dur, vol=0.25):
+    """Pitido digital: onda cuasi-cuadrada suavizada (armónicos impares)."""
+    t = _t(dur)
+    w = sum(np.sin(2 * np.pi * freq * k * t) / k for k in (1, 3, 5))
+    e = np.ones(len(t), dtype=np.float32)
+    ramp = int(_SR * 0.004)
+    e[:ramp] = np.linspace(0, 1, ramp)
+    e[-ramp:] = np.linspace(1, 0, ramp)
+    return (w / 1.53) * e * vol
+
+
+def _bell(freq, dur, vol=0.18):
+    """Campanita: parciales inarmónicos que se apagan a distinto ritmo."""
+    t = _t(dur)
+    w = np.zeros(len(t), dtype=np.float32)
+    for mult, amp, dec in ((1.0, 1.0, 5.0), (2.76, 0.45, 8.0), (5.4, 0.2, 12.0)):
+        w += amp * np.sin(2 * np.pi * freq * mult * t) * np.exp(-dec * t / dur)
+    ramp = int(_SR * 0.003)
+    w[:ramp] *= np.linspace(0, 1, ramp)
+    return w / 1.65 * vol
+
+
+def _seq(*parts):
+    return np.concatenate(parts).astype(np.float32)
+
+
+def _gap(dur):
     return np.zeros(int(_SR * dur), dtype=np.float32)
 
 
-# Sonidos pregenerados (suaves, < ~250ms)
-_READY = _seq(_note(523, 0.10), _note(784, 0.16))                 # do→sol, chime de "listo"
-_START = _note(660, 0.09, vol=0.20)                              # blip de inicio
-_STOP = _note(495, 0.08, vol=0.16)                               # blip de corte
-_DONE = _note(880, 0.11, vol=0.18)                               # confirmación de pegado
-_ERROR = _note(196, 0.20, vol=0.20, harm=0.1)                    # error grave y suave
-_WAIT = _note(415, 0.10, vol=0.16)                               # "todavía cargando"
+def _build(pack):
+    if pack == "silencio":
+        return {}
+    if pack == "burbuja":
+        return {"ready": _seq(_chirp(420, 700, 0.08), _gap(0.02), _chirp(560, 940, 0.1)),
+                "start": _chirp(500, 900, 0.09), "stop": _chirp(760, 430, 0.09),
+                "done": _seq(_chirp(700, 1050, 0.06), _gap(0.015), _chirp(900, 1300, 0.07)),
+                "error": _chirp(260, 150, 0.22, vol=0.2), "wait": _chirp(480, 560, 0.08, vol=0.13)}
+    if pack == "digital":
+        return {"ready": _seq(_beep(880, 0.05), _gap(0.03), _beep(1320, 0.07)),
+                "start": _beep(1046, 0.045), "stop": _beep(784, 0.045),
+                "done": _seq(_beep(1175, 0.04), _gap(0.025), _beep(1568, 0.05)),
+                "error": _seq(_beep(220, 0.08), _gap(0.03), _beep(196, 0.1)),
+                "wait": _beep(620, 0.05, vol=0.18)}
+    if pack == "campana":
+        return {"ready": _seq(_bell(659, 0.25)[: int(_SR * 0.09)], _bell(988, 0.35)),
+                "start": _bell(880, 0.22), "stop": _bell(660, 0.22),
+                "done": _bell(1319, 0.3), "error": _bell(294, 0.4, vol=0.2),
+                "wait": _bell(587, 0.18, vol=0.12)}
+    return {"ready": _seq(_note(523, 0.10), _note(784, 0.16)),     # suave (el original)
+            "start": _note(660, 0.09, vol=0.20), "stop": _note(495, 0.08, vol=0.16),
+            "done": _note(880, 0.11, vol=0.18), "error": _note(196, 0.20, vol=0.20, harm=0.1),
+            "wait": _note(415, 0.10, vol=0.16)}
 
 
-def _play(samples):
-    if sd is None:
+_sounds = _build("suave")
+
+
+def set_pack(name):
+    global _sounds
+    _sounds = _build(name if name in dict(PACKS) else "suave")
+
+
+def _play(key):
+    s = _sounds.get(key)
+    if sd is None or s is None:
         return
     try:
-        sd.play(samples, _SR)
+        sd.play(s, _SR)
     except Exception:
         pass
 
 
-def ready():  _play(_READY)
-def start():  _play(_START)
-def stop():   _play(_STOP)
-def done():   _play(_DONE)
-def error():  _play(_ERROR)
-def wait():   _play(_WAIT)
+def preview():
+    """Muestra del pack: empezar + pegado."""
+    if sd is None or "start" not in _sounds:
+        return
+    try:
+        sd.play(_seq(_sounds["start"], _gap(0.28), _sounds["done"]), _SR)
+    except Exception:
+        pass
+
+
+def ready():  _play("ready")
+def start():  _play("start")
+def stop():   _play("stop")
+def done():   _play("done")
+def error():  _play("error")
+def wait():   _play("wait")

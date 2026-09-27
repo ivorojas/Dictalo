@@ -138,9 +138,33 @@ def frame(client, title):
     return out
 
 
+def styles_sheet():
+    """Los estilos prearmados de la ventanita, en grilla (solo PIL, sin ventanas)."""
+    import looks
+    cols, cw, ch, pad = 3, 330, 118, 18
+    rows = (len(looks.PRESETS) + cols - 1) // cols
+    W, H = cols * cw + pad * 2, rows * ch + pad * 2
+    sheet = ui.wallpaper(W, H, ui.BG, 16).copy()
+    font = ImageFont.truetype("C:/Windows/Fonts/SegUIVar.ttf", 15)
+    d = ImageDraw.Draw(sheet)
+    for k, (pid, name, _) in enumerate(looks.PRESETS):
+        s = looks.preset(pid)
+        img = looks.render(s, "recording", looks.fake_levels(s["bar_count"], 1.35), 1.35)
+        sc = min(1.0, (cw - 16) / img.width)
+        img = img.resize((round(img.width * sc), round(img.height * sc)), Image.LANCZOS)
+        ox, oy = pad + (k % cols) * cw, pad + (k // cols) * ch
+        d.text((ox + cw / 2, oy + 12), name, font=font, fill=(236, 238, 245), anchor="mm")
+        sheet.alpha_composite(img, (ox + (cw - img.width) // 2, oy + 22))
+    sheet.save(ROOT / "assets" / "styles.png")
+
+
 def main():
+    fg = u32.GetForegroundWindow()
     root = tk.Tk()
     root.withdraw()
+    root.update_idletasks()
+    if fg and u32.GetForegroundWindow() != fg:    # crear el root lo activa un instante
+        u32.SetForegroundWindow(fg)
     ui.init(root)
     ctx = settings.sample_context()
     try:
@@ -155,9 +179,17 @@ def main():
         settings.HistoryView(win, ctx)
         frame(capture(win), "Historial").save(ROOT / "assets" / "history.png")
         win.destroy()
+
+        win = _hidden_window(root, settings.W_LOOKS, 820)
+        settings.LooksView(win, ctx)
+        frame(capture(win), "Apariencia").save(ROOT / "assets" / "appearance.png")
+        win.destroy()
     finally:
         root.destroy()
-    print("OK -> assets/settings.png, assets/history.png")
+        if fg and u32.GetForegroundWindow() != fg:
+            u32.SetForegroundWindow(fg)
+    styles_sheet()
+    print("OK -> assets/settings.png, history.png, appearance.png, styles.png")
 
 
 if __name__ == "__main__":

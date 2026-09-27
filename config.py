@@ -57,6 +57,15 @@ class Config:
     hotkey: str = "<f9>"
     hotkey_display: str = "F9"
 
+    # Ventanita flotante: estilo elegido (id de preset, "custom" o "mine:<nombre>"),
+    # el personalizado en edición y los guardados por el usuario (ver looks.py)
+    overlay_preset: str = "aurora"
+    overlay_custom: dict = field(default_factory=dict)
+    overlay_mine: list = field(default_factory=list)
+
+    # Sonidos: pack elegido (ver sounds.PACKS)
+    sound_pack: str = "suave"
+
     def __post_init__(self):
         self._load()
 

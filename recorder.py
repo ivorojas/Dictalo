@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import sounddevice as sd
 
-NBANDS = 14
+NBANDS = 28   # = máximo de barras elegible; cada estilo agrupa/reparte (looks.resample)
 
 
 class Recorder:

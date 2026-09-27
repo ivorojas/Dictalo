@@ -40,13 +40,15 @@ transcriber.py STT faster-whisper large-v3-turbo en CUDA int8 (fallback CPU). Id
                Colchón de silencio al final, filtro de alucinaciones de subtítulos, punto final + espacio.
 injector.py    pega el texto: foco a la ventana destino + clipboard + Ctrl+V (con scan codes).
 cleaner.py     limpieza opcional con Gemini (OFF; el dueño NO usa IA; oculta en Ajustes pero sigue en config).
-overlay.py     overlay flotante (tkinter topmost, NOACTIVATE, click-through). Barras = espectro real.
+overlay.py     ventanita flotante = ventana en capas Win32 (UpdateLayeredWindow, alpha por píxel), topmost,
+               click-through, NOACTIVATE. Dibuja cada cuadro con looks.render() (~6 ms). Tk root invisible.
+looks.py       estilos de la ventanita: DEFAULT + 12 PRESETS, resolve() (valida prefs), render() con PIL.
 splash.py      tarjeta de carga centrada mientras carga el modelo (se cierra sola al estar listo).
 ui.py          kit de interfaz: tema, fuentes Segoe UI Variable + íconos Segoe Fluent, formas suavizadas
                (PIL 4x → PhotoImage), Card/Button/Chip/Tag/TagCloud/Field/Select/ScrollArea, barra de título DWM.
-settings.py    ventanas de Ajustes e Historial (guardado automático, atajo en vivo, historial con búsqueda).
+settings.py    ventanas de Ajustes, Historial y Apariencia (galería de estilos + Personalizar + Mis estilos).
 history.py     dictados con fecha en ~/.dictado/history.json; se borran solos a los 3 días (RETENTION_DAYS).
-sounds.py      sonidos suaves sintetizados (numpy+sounddevice).
+sounds.py      sonidos sintetizados (numpy+sounddevice) en packs: Suave, Burbuja, Digital, Campana, Silencio.
 dictado.spec   build PyInstaller (windowed, bundlea faster-whisper + DLLs nvidia, ficha de versión del .exe).
 installer.iss  Inno Setup: instala en %LOCALAPPDATA%\Programs\Dictado App, accesos, inicio con Windows.
 icono.ico      ícono (degradé cian→violeta con barras de onda), generado por assets\render_icon.py.
@@ -95,8 +97,16 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   ACTUALIZAR la instalación vieja; `[InstallDelete]` borra su carpeta y accesos; `AppMutex` pide cerrarla.
 - **Instancia única**: mutex `Global\DictadoApp_SingleInstance`; además no arranca si está abierta la vieja
   (`Global\Dictalo_SingleInstance`), porque pelearían por el atajo.
-- **Overlay sin robar foco**: estilos `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT` aplicados al HWND top-level real
-  (`GetAncestor(GA_ROOT)`), mostrar vía alpha (no deiconify). Así no roba el foco y el Ctrl+V cae en tu campo.
+- **Overlay (v1.2)**: ya no es Tk. Es una ventana en capas Win32 propia (`overlay.LayeredWindow`): clase con
+  `DefWindowProcW` como procedimiento (sin callbacks de Python; sus mensajes los despacha el mainloop de Tk,
+  mismo hilo), `WS_EX_LAYERED|TRANSPARENT|TOPMOST|TOOLWINDOW|NOACTIVATE`, se muestra con
+  `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE|SWP_SHOWWINDOW)` y cada cuadro va por `UpdateLayeredWindow`
+  (BGRA con alpha premultiplicado). Medido: nunca toma el foco. Permite sombra, cristal, resplandor, sin fondo.
+- **Estilos de la ventanita**: config guarda `overlay_preset` ("aurora"…, "custom" o "mine:<nombre>"),
+  `overlay_custom` y `overlay_mine`; `looks.current(config)` devuelve el estilo resuelto. `looks.resolve`
+  descarta valores inválidos (un prefs.json viejo o editado a mano nunca rompe el overlay).
+- **Crear el Tk root activa la ventana un instante** (aunque se retire enseguida): pasa al arrancar la app (ok)
+  y en autotests/capturas → ahí se devuelve el foco en el acto (`ui.restore_foreground`).
 - **Arranque instantáneo**: el modelo carga + warmup del mic en un hilo de fondo; el tray aparece al toque.
   El delay de ~6s al abrir es cargar el modelo en VRAM; **se resuelve con el auto-arranque** (queda caliente).
 - **Modelo STT**: large-v3-turbo, CUDA int8, `beam_size=5`, `hotwords=vocabulario`,
@@ -104,10 +114,12 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   Medido: int8_float16/float16 no mejoran nada; nuestros cambios no afectan la precisión. Pesa la distancia al mic.
 - **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.
 
-## Estado actual (v1.1.0)
+## Estado actual (v1.2.0)
 Funciona end-to-end: dicta, transcribe, pega donde cortás, overlay con espectro, sonidos, splash, avisos si el
 mic no capta o no se pudo pegar, Ajustes rediseñados (guardado automático), historial de 3 días con ventana
 propia y búsqueda, vocabulario en etiquetas con "Ver más", auto-arranque, idioma en/es.
+v1.2: ventanita personalizable (12 estilos prearmados, editor pieza por pieza con vista previa en vivo,
+"Mis estilos" con nombre) y packs de sonidos.
 
 ## Cómo verificar (sin poder hablar)
 El asistente NO puede usar la voz ni ver la pantalla del dueño. Para validar:

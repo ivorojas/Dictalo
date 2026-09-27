@@ -1,7 +1,7 @@
-"""Ventanas de Ajustes e Historial de Dictado App.
+"""Ventanas de Ajustes, Historial y Apariencia de Dictado App.
 
-Todo se guarda solo (no hay botón Guardar): el micrófono y el vocabulario aplican
-al instante y el atajo se re-arma en vivo (callback on_hotkey de main).
+Todo se guarda solo (no hay botón Guardar): micrófono, vocabulario, sonidos y la
+ventanita aplican al instante; el atajo se re-arma en vivo (callback on_hotkey).
 La limpieza con IA (Gemini) sigue existiendo en config/cleaner pero no se muestra:
 el dueño no la usa.
 """
@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from PIL import ImageTk
 
 import history
+import looks
+import sounds
 import ui
 from brand import APP_NAME, __version__, make_icon
 from ui import F
@@ -20,11 +22,41 @@ from ui import F
 HOTKEYS = [("F9", "<f9>"), ("F8", "<f8>"), ("F10", "<f10>"),
            ("Ctrl+Alt+D", "<ctrl>+<alt>+d"), ("Ctrl+Shift+Espacio", "<ctrl>+<shift>+<space>")]
 PREVIEW = 3
-W_SETTINGS, W_HISTORY = 560, 600
+W_SETTINGS, W_HISTORY, W_LOOKS = 560, 600, 576
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+# Opciones de la ventanita, en el orden en que se muestran
+LOOK_OPTIONS = {
+    "shape": [("Píldora", "pill"), ("Redondeada", "rounded"), ("Recta", "square")],
+    "size": [("Chica", "small"), ("Normal", "normal"), ("Grande", "large")],
+    "bg_mode": [("Sólido", "solid"), ("Cristal", "glass"), ("Sin fondo", "none")],
+    "border": [("Sin borde", "none"), ("Sutil", "subtle"), ("Color", "accent"),
+               ("Degradé", "gradient")],
+    "shadow": [("Con sombra", True), ("Sin sombra", False)],
+    "dot": [("Halo", "halo"), ("Punto", "dot"), ("Anillo", "ring"), ("Micrófono", "mic"),
+            ("Ninguno", "none")],
+    "dot_anim": [("Latido", "pulse"), ("Parpadeo", "blink"), ("Fijo", "still")],
+    "bars": [("Redondeadas", "rounded"), ("Rectas", "square"), ("Puntos", "dots"),
+             ("Onda", "wave"), ("Espejo", "mirror"), ("Bloques", "blocks")],
+    "bar_count": [("8", 8), ("14", 14), ("20", 20), ("28", 28)],
+    "thickness": [("Finas", "thin"), ("Normales", "normal"), ("Gruesas", "thick")],
+    "colors": [("Degradé", "gradient"), ("Un color", "solid"), ("Arcoíris", "rainbow"),
+               ("Arcoíris animado", "rainbow_anim")],
+    "glow": [("Con resplandor", True), ("Sin resplandor", False)],
+    "speed": [("Suave", "smooth"), ("Normal", "normal"), ("Rápido", "snappy")],
+    "processing": [("Puntos", "dots"), ("Órbita", "orbit"), ("Onda", "wave"), ("Barra", "bar")],
+    "position": [("Abajo", "bottom"), ("Arriba", "top")],
+}
+BAR_COLORS = ["#22d3ee", "#38bdf8", "#6366f1", "#a78bfa", "#f472b6", "#fb7185", "#f97316",
+              "#facc15", "#34d399", "#ffffff"]
+BG_COLORS = ["#0e0f16", "#06060b", "#111827", "#1c2130", "#1e1b4b", "#150b07", "#06141c",
+             "#f8fafc"]
+DOT_COLORS = ["#ff5470", "#ef4444", "#f97316", "#facc15", "#34d399", "#22d3ee", "#a78bfa",
+              "#ffffff"]
 
 _win = None
 _hist_win = None
+_look_win = None
 
 
 def input_devices():
@@ -98,6 +130,11 @@ class Context:
         self.copy = _clipboard_set
         self.devices = input_devices
 
+    @staticmethod
+    def set_sound(pack):
+        sounds.set_pack(pack)
+        sounds.preview()
+
 
 def sample_context():
     """Datos de ejemplo inventados (autotest del .exe e imágenes del README)."""
@@ -115,12 +152,13 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", sound_pack="suave",
+        overlay_preset="aurora", overlay_custom={}, overlay_mine=[],
         vocabulary="Claude, GitHub, Python, React, TypeScript, Docker, Kubernetes, Figma, Notion, "
                    "Slack, Vercel, Supabase, Stripe, Tailwind, PostgreSQL, Whisper, PowerShell, "
                    "VS Code, Linear, Jira")
     return SimpleNamespace(
-        config=cfg, save=lambda: None, on_hotkey=lambda: None,
+        config=cfg, save=lambda: None, on_hotkey=lambda: None, set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
         copy=lambda text: None,
@@ -129,19 +167,40 @@ def sample_context():
                          ("Micrófono (Realtek(R) Audio)", 2)])
 
 
+class _Toast:
+    """Texto del pie que muestra "✓ Guardado" un momento y vuelve a su mensaje."""
+
+    def _toast_init(self, parent, idle):
+        self._idle = idle
+        self._toast_job = None
+        self.saved = ui.label(parent, idle, F.tiny, ui.TEXT_3, bg=ui.BG)
+        return self.saved
+
+    def _toast(self, text):
+        self.saved.configure(text=f"✓ {text}", fg=ui.SUCCESS)
+        if self._toast_job:
+            self.win.after_cancel(self._toast_job)
+
+        def back():
+            self._toast_job = None
+            if self.saved.winfo_exists():
+                self.saved.configure(text=self._idle, fg=ui.TEXT_3)
+        self._toast_job = self.win.after(1800, back)
+
+
 # ── Ajustes ──────────────────────────────────────────────────────────────────
-class SettingsView:
+class SettingsView(_Toast):
     def __init__(self, win, ctx):
         self.win, self.ctx = win, ctx
         self._hist_ver = None
         self._status = None
-        self._toast_job = None
         self.area = ui.ScrollArea(win)
         self.area.pack(fill="both", expand=True)
         root = tk.Frame(self.area.inner, bg=ui.BG)
         root.pack(fill="both", expand=True, padx=(28, 16), pady=(22, 20))
         self._header(root)
         self._dictado(root)
+        self._ventanita(root)
         self._vocabulario(root)
         self._historial(root)
         self._footer(root)
@@ -177,7 +236,7 @@ class SettingsView:
         ui.label(row, title, F.h2, bg=ui.BG).pack(side="left")
         return row
 
-    # dictado: micrófono + atajo
+    # dictado: micrófono, atajo y sonidos
     def _dictado(self, p):
         self._section(p, "Dictado")
         card = ui.Card(p)
@@ -191,32 +250,64 @@ class SettingsView:
         ui.label(b, "Atajo para dictar", F.body_sb).pack(anchor="w")
         ui.label(b, "Tocalo una vez para empezar y otra para terminar y pegar el texto.",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
-        self.keys = tk.Frame(b, bg=ui.SURFACE)
-        self.keys.pack(fill="x")
-        self._render_keys()
-
-    def _render_keys(self):
-        for w in self.keys.winfo_children():
-            w.destroy()
-        for text, value in HOTKEYS:
-            on = value == self.ctx.config.hotkey
-            ui.Button(self.keys, text, kind="chip_on" if on else "chip", height=34, padx=14,
-                      radius=17, font=F.body_sb,
-                      command=lambda t=text, v=value: self._set_hotkey(t, v)).pack(
-                side="left", padx=(0, 8))
+        ui.ChipGroup(b, HOTKEYS, self.ctx.config.hotkey, self._set_hotkey, height=34).pack(fill="x")
+        ui.separator(b).pack(fill="x", pady=18)
+        ui.label(b, "Sonidos", F.body_sb).pack(anchor="w")
+        ui.label(b, "Al empezar, al terminar y si algo falla. Al elegir uno suena de muestra.",
+                 F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
+        ui.ChipGroup(b, [(name, pid) for pid, name in sounds.PACKS],
+                     getattr(self.ctx.config, "sound_pack", "suave"), self._set_sound,
+                     height=34).pack(fill="x")
 
     def _set_mic(self, index):
         self.ctx.config.mic_index = index
         self._saved()
 
-    def _set_hotkey(self, text, value):
-        if value == self.ctx.config.hotkey:
-            return
-        self.ctx.config.hotkey, self.ctx.config.hotkey_display = value, text
+    def _set_hotkey(self, value):
+        self.ctx.config.hotkey = value
+        self.ctx.config.hotkey_display = dict((v, t) for t, v in HOTKEYS)[value]
         self._saved()
         self.ctx.on_hotkey()
-        self._render_keys()
         self._refresh_header()
+
+    def _set_sound(self, pack):
+        self.ctx.config.sound_pack = pack
+        self._saved()
+        self.ctx.set_sound(pack)
+
+    # ventanita flotante
+    def _ventanita(self, p):
+        row = self._section(p, "Ventanita de grabación")
+        ui.Button(row, "Cambiar apariencia", command=self._open_looks, kind="link", bg=ui.BG,
+                  height=24, padx=2, font=F.small_sb, icon=ui.I_RIGHT, icon_right=True).pack(
+            side="right", pady=(2, 0))
+        card = ui.Card(p)
+        card.pack(fill="x", pady=(0, 28))
+        b = card.body
+        self.stage = ui.Stage(b, get_style=lambda: looks.current(self.ctx.config), height=112,
+                              fps=20)
+        self.stage.configure(cursor="hand2")
+        self.stage.bind("<ButtonRelease-1>", lambda e: self._open_looks())
+        self.stage.pack(fill="x")
+        row2 = tk.Frame(b, bg=ui.SURFACE)
+        row2.pack(fill="x", pady=(12, 0))
+        self.look_name = ui.label(row2, "", F.body_sb)
+        self.look_name.pack(side="left")
+        ui.label(row2, "Elegí un estilo o armá el tuyo", F.small, ui.TEXT_3).pack(side="right")
+        self._refresh_look()
+
+    def _refresh_look(self):
+        if self.look_name.winfo_exists():
+            self.look_name.configure(text=f"Estilo: {looks.current_name(self.ctx.config)}")
+
+    def _open_looks(self):
+        self.stage.paused = True
+        open_looks(self.win, self.ctx, on_change=self._refresh_look, on_close=self._looks_closed)
+
+    def _looks_closed(self):
+        if self.stage.winfo_exists():
+            self.stage.paused = False
+        self._refresh_look()
 
     # vocabulario
     def _vocabulario(self, p):
@@ -331,23 +422,11 @@ class SettingsView:
         foot = tk.Frame(p, bg=ui.BG)
         foot.pack(fill="x", pady=(28, 0))
         ui.label(foot, f"{APP_NAME} {__version__}", F.tiny, ui.TEXT_3, bg=ui.BG).pack(side="left")
-        self.saved = ui.label(foot, "Los cambios se guardan solos", F.tiny, ui.TEXT_3, bg=ui.BG)
-        self.saved.pack(side="right")
+        self._toast_init(foot, "Los cambios se guardan solos").pack(side="right")
 
     def _saved(self):
         self.ctx.save()
         self._toast("Guardado")
-
-    def _toast(self, text):
-        self.saved.configure(text=f"✓ {text}", fg=ui.SUCCESS)
-        if self._toast_job:
-            self.win.after_cancel(self._toast_job)
-
-        def back():
-            self._toast_job = None
-            if self.saved.winfo_exists():
-                self.saved.configure(text="Los cambios se guardan solos", fg=ui.TEXT_3)
-        self._toast_job = self.win.after(1800, back)
 
     def _poll(self):
         """Refresca el historial y el estado mientras la ventana está abierta."""
@@ -479,6 +558,184 @@ class HistoryView:
         self._footer()
 
 
+# ── Apariencia de la ventanita ───────────────────────────────────────────────
+class LooksView(_Toast):
+    def __init__(self, win, ctx, on_change=None):
+        self.win, self.ctx = win, ctx
+        self.on_change = on_change or (lambda: None)
+        self.hover = None
+        self.tab = "styles"
+        top = tk.Frame(win, bg=ui.BG)
+        top.pack(fill="x", padx=28, pady=(22, 0))
+        ui.label(top, "Ventanita de grabación", F.title, bg=ui.BG).pack(anchor="w")
+        ui.label(top, "Elegí un estilo o armá el tuyo pieza por pieza. Se guarda solo.",
+                 F.small, ui.TEXT_2, bg=ui.BG).pack(anchor="w", pady=(4, 14))
+        self.stage = ui.Stage(top, get_style=self._stage_style, height=150, bg=ui.BG, fps=30)
+        self.stage.pack(fill="x")
+        bar = tk.Frame(top, bg=ui.BG)
+        bar.pack(fill="x", pady=(14, 0))
+        self.tabs = ui.Segmented(bar, [("Estilos", "styles"), ("Personalizar", "custom")],
+                                 "styles", self._switch, bg=ui.BG, height=34)
+        self.tabs.pack(side="left")
+        ui.Segmented(bar, [("Grabando", "recording"), ("Transcribiendo", "processing")],
+                     "recording", self._set_state, bg=ui.BG, height=28).pack(side="right")
+
+        foot = tk.Frame(win, bg=ui.BG)
+        foot.pack(side="bottom", fill="x", padx=28, pady=(12, 18))
+        ui.separator(win).pack(side="bottom", fill="x")
+        ui.Button(foot, "Listo", command=win.destroy, kind="secondary", bg=ui.BG, height=34,
+                  padx=20).pack(side="right")
+        self._toast_init(foot, "Los cambios se aplican al instante").pack(side="left")
+
+        self.area = ui.ScrollArea(win)
+        self.area.pack(fill="both", expand=True, padx=(28, 16), pady=(16, 0))
+        self._render()
+
+    def _stage_style(self):
+        return self.hover or looks.current(self.ctx.config)
+
+    def _set_state(self, state):
+        self.stage.state = state
+
+    def _switch(self, tab):
+        self.tab = tab
+        self.tabs.set(tab)
+        self._render()
+
+    def _render(self):
+        for w in self.area.inner.winfo_children():
+            w.destroy()
+        body = tk.Frame(self.area.inner, bg=ui.BG)
+        body.pack(fill="both", expand=True, pady=(0, 8))
+        (self._styles if self.tab == "styles" else self._custom)(body)
+        self.area.to_top()
+
+    # pestaña Estilos
+    def _styles(self, body):
+        cfg = self.ctx.config
+        ui.label(body, "Prearmados", F.h2, bg=ui.BG).pack(anchor="w", pady=(0, 10))
+        grid = ui.Flow(body, bg=ui.BG, gap=12, gapy=12)
+        grid.pack(fill="x")
+        for pid, name, _ in looks.PRESETS:
+            grid.put(ui.StyleCard(grid, name, looks.preset(pid), cfg.overlay_preset == pid,
+                                  on_pick=lambda p=pid: self._pick(p), on_hover=self._hover,
+                                  bg=ui.BG))
+        ui.label(body, "Tus estilos", F.h2, bg=ui.BG).pack(anchor="w", pady=(26, 3))
+        ui.label(body, "Lo que armás en Personalizar y los estilos que guardaste con nombre.",
+                 F.small, ui.TEXT_3, bg=ui.BG).pack(anchor="w", pady=(0, 10))
+        mine = ui.Flow(body, bg=ui.BG, gap=12, gapy=12)
+        mine.pack(fill="x")
+        if cfg.overlay_custom:
+            mine.put(ui.StyleCard(mine, "Personalizado", looks.resolve(cfg.overlay_custom),
+                                  cfg.overlay_preset == "custom",
+                                  on_pick=lambda: self._pick("custom"), on_hover=self._hover,
+                                  bg=ui.BG))
+        for it in cfg.overlay_mine:
+            name = it.get("name", "")
+            mine.put(ui.StyleCard(mine, name, looks.resolve(it.get("style")),
+                                  cfg.overlay_preset == "mine:" + name,
+                                  on_pick=lambda n=name: self._pick("mine:" + n),
+                                  on_hover=self._hover, on_delete=lambda n=name: self._delete(n),
+                                  bg=ui.BG))
+        mine.put(ui.ActionCard(mine, ui.I_ADD, "Crear el tuyo", lambda: self._switch("custom"),
+                               bg=ui.BG))
+
+    def _hover(self, style):
+        self.hover = style
+
+    def _pick(self, sel):
+        self.ctx.config.overlay_preset = sel
+        self._changed()
+        self._render()
+
+    def _delete(self, name):
+        cfg = self.ctx.config
+        if cfg.overlay_preset == "mine:" + name:     # si era el elegido, queda como Personalizado
+            cfg.overlay_custom = looks.current(cfg)
+            cfg.overlay_preset = "custom"
+        cfg.overlay_mine = [it for it in cfg.overlay_mine if it.get("name") != name]
+        self.hover = None
+        self._changed("Estilo borrado")
+        self._render()
+
+    # pestaña Personalizar
+    def _custom(self, body):
+        s = looks.current(self.ctx.config)
+
+        def group(title):
+            ui.label(body, title, F.h2, bg=ui.BG).pack(anchor="w", pady=(0, 10))
+            card = ui.Card(body)
+            card.pack(fill="x", pady=(0, 24))
+            return card.body
+
+        def row(parent, label, key, first=False):
+            ui.label(parent, label, F.body_sb).pack(anchor="w", pady=(0 if first else 16, 9))
+            ui.ChipGroup(parent, LOOK_OPTIONS[key], s[key],
+                         lambda v, k=key: self._set(k, v)).pack(fill="x")
+
+        def colors(parent, label, key, palette, first=False):
+            ui.label(parent, label, F.body_sb).pack(anchor="w", pady=(0 if first else 16, 9))
+            ui.Swatches(parent, palette, s[key], lambda v, k=key: self._set(k, v)).pack(fill="x")
+
+        b = group("Forma y fondo")
+        row(b, "Forma", "shape", first=True)
+        row(b, "Tamaño", "size")
+        row(b, "Fondo", "bg_mode")
+        colors(b, "Color de fondo", "bg", BG_COLORS)
+        row(b, "Borde", "border")
+        row(b, "Sombra", "shadow")
+        b = group("Punto de grabación")
+        row(b, "Estilo", "dot", first=True)
+        colors(b, "Color", "dot_color", DOT_COLORS)
+        row(b, "Animación", "dot_anim")
+        b = group("Barras de voz")
+        row(b, "Estilo", "bars", first=True)
+        row(b, "Cantidad", "bar_count")
+        row(b, "Grosor", "thickness")
+        row(b, "Colores", "colors")
+        colors(b, "Color principal", "color1", BAR_COLORS)
+        colors(b, "Segundo color (para degradé y borde)", "color2", BAR_COLORS)
+        row(b, "Resplandor", "glow")
+        row(b, "Movimiento", "speed")
+        b = group("Mientras transcribe")
+        row(b, "Animación", "processing", first=True)
+        b = group("Posición")
+        row(b, "Dónde aparece", "position", first=True)
+        b = group("Guardar como estilo propio")
+        ui.label(b, "Queda en Tus estilos para volver a usarlo cuando quieras.", F.small,
+                 ui.TEXT_3).pack(anchor="w", pady=(0, 12))
+        line = tk.Frame(b, bg=ui.SURFACE)
+        line.pack(fill="x")
+        ui.Button(line, "Guardar", command=self._save_mine, kind="primary", height=40,
+                  padx=20).pack(side="right", padx=(10, 0))
+        self.name_field = ui.Field(line, placeholder=f"Mi estilo {len(self.ctx.config.overlay_mine) + 1}",
+                                   on_submit=lambda v: self._save_mine())
+        self.name_field.pack(side="left", fill="x", expand=True)
+
+    def _set(self, key, value):
+        cfg = self.ctx.config
+        st = looks.current(cfg)
+        st[key] = value
+        cfg.overlay_custom = st
+        cfg.overlay_preset = "custom"
+        self._changed()
+
+    def _save_mine(self):
+        cfg = self.ctx.config
+        name = (self.name_field.value().strip() or self.name_field.placeholder)[:40]
+        st = looks.current(cfg)
+        cfg.overlay_mine = [it for it in cfg.overlay_mine if it.get("name") != name] + \
+            [{"name": name, "style": st}]
+        cfg.overlay_preset = "mine:" + name
+        self._changed(f"Guardado como “{name}”")
+        self._switch("styles")
+
+    def _changed(self, msg="Guardado"):
+        self.ctx.save()
+        self._toast(msg)
+        self.on_change()
+
+
 # ── Apertura ─────────────────────────────────────────────────────────────────
 def open_history(parent, ctx):
     global _hist_win
@@ -497,6 +754,28 @@ def open_history(parent, ctx):
     ui.set_icon(win)
     ui.show_window(win, W_HISTORY, min(720, win.winfo_screenheight() - 120), over=parent)
     win.bind("<Escape>", lambda e: win.destroy())
+
+
+def open_looks(parent, ctx, on_change=None, on_close=None):
+    global _look_win
+    if _look_win is not None and _look_win.winfo_exists():
+        _look_win.lift()
+        _look_win.focus_force()
+        return
+    win = tk.Toplevel(parent)
+    _look_win = win
+    win.withdraw()
+    win.title("Apariencia")
+    win.configure(bg=ui.BG)
+    win.transient(parent)
+    win.resizable(False, True)
+    win.minsize(W_LOOKS, 520)
+    LooksView(win, ctx, on_change)
+    ui.set_icon(win)
+    ui.show_window(win, W_LOOKS, min(860, win.winfo_screenheight() - 110), over=parent)
+    win.bind("<Escape>", lambda e: win.destroy())
+    if on_close:
+        win.bind("<Destroy>", lambda e: on_close() if e.widget is win else None, add="+")
 
 
 def open_settings(root, config, on_hotkey=None, status=None):
@@ -522,17 +801,29 @@ def open_settings(root, config, on_hotkey=None, status=None):
 
 
 def selftest(root):
-    """Construye Ajustes e Historial con datos de ejemplo SIN mostrarlos (ventanas
-    retiradas: no aparecen ni roban foco) y los destruye. Verifica que el .exe arma
-    bien la interfaz: fuentes, imágenes suavizadas (PIL→Tk) y componentes."""
+    """Construye Ajustes, Historial y Apariencia (sus dos pestañas) con datos de
+    ejemplo SIN mostrarlos (no aparecen ni roban foco), dibuja todos los estilos de
+    la ventanita y prueba la ventana en capas fuera de la pantalla."""
     ui.init(root)
     ctx = sample_context()
-    for View in (SettingsView, HistoryView):
+    for build in (lambda w: SettingsView(w, ctx), lambda w: HistoryView(w, ctx),
+                  lambda w: LooksView(w, ctx), lambda w: LooksView(w, ctx)._switch("custom")):
         win = tk.Toplevel(root)
         win.withdraw()
-        View(win, ctx)
+        build(win)
         win.update_idletasks()
         win.destroy()
     ui.shape(300, 120, 14, fill=ui.SURFACE, border=ui.BORDER)
     ui.shape(120, 34, 17, grad=(ui.CYAN, ui.VIOLET))
+    for pid in looks.PRESET_IDS:
+        s = looks.preset(pid)
+        looks.render(s, "recording", looks.fake_levels(s["bar_count"], 1.0), 1.0)
+        looks.render(s, "processing", [0.0] * s["bar_count"], 1.0)
+    from overlay import LayeredWindow
+    lw = LayeredWindow()
+    ok = lw.show(looks.render(looks.preset("aurora"), "recording", [0.5] * 14, 0.5), -9000, -9000)
+    lw.hide()
+    lw.destroy()
+    if not ok:
+        raise RuntimeError("UpdateLayeredWindow falló")
     return True

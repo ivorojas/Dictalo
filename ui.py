@@ -9,12 +9,16 @@ Usa su propia instancia de user32/dwmapi para no pisar los prototipos ctypes que
 injector.py define sobre ctypes.windll.user32.
 """
 import ctypes
+import json
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from ctypes import wintypes
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageTk
+
+import looks
 
 # ── Paleta (misma identidad que el overlay: fondo casi negro + cian→violeta) ──
 BG = "#0c0e13"
@@ -88,6 +92,11 @@ def _rgb(c):
 def mix(c1, c2, t):
     a, b = _rgb(c1), _rgb(c2)
     return "#%02x%02x%02x" % tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _lum(c):
+    r, g, b = _rgb(c)
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
 
 
 def _render(w, h, r, fill, border, grad, bw):
@@ -604,6 +613,330 @@ class Pill(tk.Canvas):
         self.itemconfigure(self._tx, text=text, fill=TEXT_2)
 
 
+class Flow(tk.Frame):
+    """Acomoda sus hijos en filas según el ancho disponible (como palabras)."""
+
+    def __init__(self, parent, bg=SURFACE, gap=6, gapy=6):
+        super().__init__(parent, bg=bg, height=1)
+        self.gap, self.gapy = gap, gapy
+        self.items = []
+        self.bind("<Configure>", lambda e: self._flow())
+
+    def put(self, w):
+        self.items.append(w)
+        self._flow()
+        return w
+
+    def clear(self):
+        for w in self.items:
+            w.destroy()
+        self.items = []
+
+    def _flow(self):
+        W = self.winfo_width()
+        if W <= 1:
+            return
+        x = y = rowh = 0
+        for w in self.items:
+            ww, wh = w.winfo_reqwidth(), w.winfo_reqheight()
+            if x and x + ww > W:
+                x, y, rowh = 0, y + rowh + self.gapy, 0
+            w.place(x=x, y=y)
+            x += ww + self.gap
+            rowh = max(rowh, wh)
+        h = max(1, y + rowh)
+        if int(self["height"]) != h:
+            self.configure(height=h)
+
+
+class _Choice:
+    """Opciones excluyentes como chips; la elegida lleva el degradé de la marca."""
+
+    def _chips(self, options, value, on_change, bg, height, place):
+        self.value, self.on_change = value, on_change
+        self._btns = {}
+        for text, v in options:
+            b = Button(self, text, kind="chip_on" if v == value else "chip", bg=bg, height=height,
+                       padx=13, radius=height // 2, font=F.small_sb,
+                       command=lambda v=v: self._pick(v))
+            self._btns[v] = b
+            place(b)
+
+    def _pick(self, v):
+        if v != self.value:
+            self.set(v)
+            self.on_change(v)
+
+    def set(self, v):
+        old, new = self._btns.get(self.value), self._btns.get(v)
+        if old:
+            old.update_content(kind="chip")
+        self.value = v
+        if new:
+            new.update_content(kind="chip_on")
+
+
+class ChipGroup(Flow, _Choice):
+    """Chips que se acomodan en varias filas si no entran."""
+
+    def __init__(self, parent, options, value, on_change, bg=SURFACE, height=32):
+        Flow.__init__(self, parent, bg=bg)
+        self._chips(options, value, on_change, bg, height, self.put)
+
+
+class Segmented(tk.Frame, _Choice):
+    """Chips en una sola fila (pestañas, conmutadores)."""
+
+    def __init__(self, parent, options, value, on_change, bg=SURFACE, height=32):
+        tk.Frame.__init__(self, parent, bg=bg)
+        self._chips(options, value, on_change, bg, height,
+                    lambda b: b.pack(side="left", padx=(0, 6)))
+
+
+class Swatches(Flow):
+    """Muestras de color redondas; la elegida con un anillo. El "+" abre el selector
+    de colores de Windows (y ese color queda como una muestra más)."""
+
+    S = 30
+
+    def __init__(self, parent, colors, value, on_change, bg=SURFACE):
+        super().__init__(parent, bg=bg, gap=6)
+        self.colors, self.value, self.on_change, self._bg = list(colors), value, on_change, bg
+        self._render()
+
+    def _render(self):
+        self.clear()
+        extra = [] if any(c.lower() == self.value.lower() for c in self.colors) else [self.value]
+        for c in self.colors + extra:
+            self.put(self._swatch(c))
+        self.put(self._plus())
+
+    def _swatch(self, color):
+        S = self.S
+        c = tk.Canvas(self, width=S, height=S, bg=self._bg, highlightthickness=0, bd=0,
+                      cursor="hand2")
+        c._imgs = []
+        if color.lower() == self.value.lower():
+            c._imgs += [shape(S, S, S // 2, fill=ACCENT), shape(S - 4, S - 4, (S - 4) // 2,
+                                                                  fill=self._bg)]
+            c.create_image(0, 0, anchor="nw", image=c._imgs[0])
+            c.create_image(2, 2, anchor="nw", image=c._imgs[1])
+            inner = S - 10
+        else:
+            inner = S - 6
+        edge = BORDER_HI if abs(_lum(color) - _lum(self._bg)) < 0.12 else None
+        c._imgs.append(shape(inner, inner, inner // 2, fill=color, border=edge))
+        c.create_image((S - inner) // 2, (S - inner) // 2, anchor="nw", image=c._imgs[-1])
+        c.bind("<ButtonRelease-1>", lambda e: self._pick(color))
+        return c
+
+    def _plus(self):
+        S = self.S
+        c = tk.Canvas(self, width=S, height=S, bg=self._bg, highlightthickness=0, bd=0,
+                      cursor="hand2")
+        c._img = shape(S - 6, S - 6, (S - 6) // 2, fill=FIELD, border=BORDER_HI)
+        c.create_image(3, 3, anchor="nw", image=c._img)
+        c.create_text(S / 2, S / 2 + 1, text=I_ADD, font=F.icon_sm, fill=TEXT_2)
+        c.bind("<ButtonRelease-1>", lambda e: self._custom())
+        return c
+
+    def _custom(self):
+        from tkinter import colorchooser
+        _, hexc = colorchooser.askcolor(color=self.value, parent=self.winfo_toplevel(),
+                                        title="Elegí un color")
+        if hexc:
+            self._pick(hexc.lower())
+
+    def _pick(self, color):
+        self.value = color
+        self._render()
+        self.on_change(color)
+
+
+_walls = {}
+
+
+def wallpaper(w, h, bg=SURFACE, radius=12):
+    """Fondo tipo escritorio (degradé con manchas de color) con esquinas redondeadas,
+    para ver bien los estilos con cristal o sin fondo."""
+    key = (w, h, bg, radius)
+    if key in _walls:
+        return _walls[key]
+    y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+    t = (x / max(1, w) * 0.65 + y / max(1, h) * 0.35)[..., None]
+    base = np.array([26, 32, 54], np.float32) * (1 - t) + np.array([58, 38, 88], np.float32) * t
+    img = Image.fromarray(base.astype(np.uint8), "RGB")
+    blob = Image.new("RGB", (w, h), (0, 0, 0))
+    d = ImageDraw.Draw(blob)
+    d.ellipse([w * 0.05, h * 0.15, w * 0.40, h * 1.3], fill=(30, 105, 135))
+    d.ellipse([w * 0.62, -h * 0.5, w * 1.05, h * 0.65], fill=(135, 60, 125))
+    img = ImageChops.screen(img, blob.filter(ImageFilter.GaussianBlur(max(4, h * 0.3))))
+    mask = Image.new("L", (w * 4, h * 4), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w * 4 - 1, h * 4 - 1], radius * 4, fill=255)
+    out = Image.new("RGBA", (w, h), _rgb(bg) + (255,))
+    out.paste(img, (0, 0), mask.resize((w, h), Image.LANCZOS))
+    if len(_walls) > 24:
+        _walls.clear()
+    _walls[key] = out
+    return out
+
+
+class Stage(tk.Canvas):
+    """Vista previa animada de la ventanita (voz simulada) sobre un fondo tipo
+    escritorio. Solo dibuja mientras está visible y no pausada."""
+
+    def __init__(self, parent, get_style, height=130, bg=SURFACE, fps=25, radius=12):
+        super().__init__(parent, height=height, bg=bg, highlightthickness=0, bd=0)
+        self.get_style, self.state, self.paused = get_style, "recording", False
+        self._bg, self._r, self._ms = bg, radius, int(1000 / fps)
+        self._photo = None
+        self._item = self.create_image(0, 0, anchor="nw")
+        self._bars, self._t0 = [], time.perf_counter()
+        self._job = self.after(50, self._tick)
+
+    def _tick(self):
+        self._job = None
+        try:
+            if not self.winfo_exists():
+                return
+            if not self.paused and self.winfo_ismapped():
+                w, h = self.winfo_width(), self.winfo_height()
+                if w > 20 and h > 20:
+                    self._draw(w, h)
+        except tk.TclError:
+            return
+        self._job = self.after(self._ms, self._tick)
+
+    def _draw(self, w, h):
+        t = time.perf_counter() - self._t0
+        s = self.get_style()
+        n = s["bar_count"]
+        target = looks.fake_levels(n, t) if self.state == "recording" else [0.0] * n
+        if len(self._bars) != n:
+            self._bars = [0.0] * n
+        k = looks.SPEED[s["speed"]]
+        self._bars = [b + (x - b) * k for b, x in zip(self._bars, target)]
+        frame = looks.render(s, self.state, self._bars, t)
+        sc = min(1.0, (w - 16) / frame.width, (h - 4) / frame.height)
+        if sc < 1:
+            frame = frame.resize((max(1, round(frame.width * sc)), max(1, round(frame.height * sc))),
+                                 Image.LANCZOS)
+        comp = wallpaper(w, h, self._bg, self._r).copy()
+        comp.alpha_composite(frame, ((w - frame.width) // 2, (h - frame.height) // 2))
+        if self._photo is None or (self._photo.width(), self._photo.height()) != (w, h):
+            self._photo = ImageTk.PhotoImage(comp)
+            self.itemconfigure(self._item, image=self._photo)
+        else:
+            self._photo.paste(comp)
+
+    def destroy(self):
+        if self._job:
+            self.after_cancel(self._job)
+            self._job = None
+        super().destroy()
+
+
+class StyleCard(tk.Canvas):
+    """Tarjeta de la galería: miniatura del estilo + nombre. La elegida lleva borde
+    de acento; las del usuario muestran ✕ para borrarlas."""
+
+    W, H = 164, 102
+    _thumbs = {}
+
+    def __init__(self, parent, name, style, selected, on_pick, on_hover=None, on_delete=None,
+                 bg=SURFACE):
+        super().__init__(parent, width=self.W, height=self.H, bg=bg, highlightthickness=0, bd=0,
+                         cursor="hand2")
+        self.style, self.selected = style, selected
+        self.on_pick, self.on_hover, self.on_delete = on_pick, on_hover, on_delete
+        self._hover, self._img = False, None
+        self._bgid = self.create_image(0, 0, anchor="nw")
+        self._thumb = self._make_thumb()
+        self.create_image(7, 7, anchor="nw", image=self._thumb)
+        self.create_text(12, self.H - 16, text=ellipsize(name, F.small_sb, self.W - 40),
+                         font=F.small_sb, fill=TEXT if selected else TEXT_2, anchor="w")
+        if selected:
+            self.create_text(self.W - 14, self.H - 15, text=I_CHECK, font=F.icon_sm, fill=ACCENT)
+        if on_delete:
+            self._xbg = shape(24, 24, 12, fill=BG)
+            self._xb = self.create_image(self.W - 21, 21, image=self._xbg, state="hidden")
+            self._x = self.create_text(self.W - 21, 22, text=I_CLOSE, font=F.icon_sm, fill=TEXT,
+                                       state="hidden")
+        self._paint()
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<ButtonRelease-1>", self._click)
+
+    def _make_thumb(self):
+        key = json.dumps(self.style, sort_keys=True)
+        ph = StyleCard._thumbs.get(key)
+        if ph is None:
+            tw, th = self.W - 14, self.H - 40
+            frame = looks.render(self.style, "recording",
+                                 looks.fake_levels(self.style["bar_count"], 1.35), 1.35)
+            sc = min((tw - 10) / frame.width, (th + 12) / frame.height)
+            frame = frame.resize((max(1, round(frame.width * sc)), max(1, round(frame.height * sc))),
+                                 Image.LANCZOS)
+            comp = wallpaper(tw, th, FIELD, 8).copy()
+            comp.alpha_composite(frame, ((tw - frame.width) // 2, (th - frame.height) // 2))
+            ph = ImageTk.PhotoImage(comp)
+            if len(StyleCard._thumbs) > 80:
+                StyleCard._thumbs.clear()
+            StyleCard._thumbs[key] = ph
+        return ph
+
+    def _paint(self):
+        border = ACCENT if self.selected else (BORDER_HI if self._hover else BORDER)
+        self._img = shape(self.W, self.H, 12, fill=FIELD, border=border, bw=2 if self.selected else 1)
+        self.itemconfigure(self._bgid, image=self._img)
+
+    def _on_x(self, e):
+        return self.on_delete and e.x >= self.W - 34 and e.y <= 34
+
+    def _enter(self, e):
+        self._hover = True
+        self._paint()
+        if self.on_delete:
+            self.itemconfigure(self._xb, state="normal")
+            self.itemconfigure(self._x, state="normal")
+        if self.on_hover:
+            self.on_hover(self.style)
+
+    def _leave(self, e):
+        self._hover = False
+        self._paint()
+        if self.on_delete:
+            self.itemconfigure(self._xb, state="hidden")
+            self.itemconfigure(self._x, state="hidden")
+        if self.on_hover:
+            self.on_hover(None)
+
+    def _click(self, e):
+        if not (0 <= e.x <= self.W and 0 <= e.y <= self.H):
+            return
+        if self._on_x(e):
+            self.on_delete()
+        else:
+            self.on_pick()
+
+
+class ActionCard(tk.Canvas):
+    """Tarjeta con ícono y texto, del mismo tamaño que StyleCard (p.ej. "Crear el tuyo")."""
+
+    def __init__(self, parent, icon, text, command, bg=SURFACE):
+        W, H = StyleCard.W, StyleCard.H
+        super().__init__(parent, width=W, height=H, bg=bg, highlightthickness=0, bd=0,
+                         cursor="hand2")
+        self._imgs = (shape(W, H, 12, fill=bg, border=BORDER_HI), shape(W, H, 12, fill=FIELD,
+                                                                          border=ACCENT))
+        self._bgid = self.create_image(0, 0, anchor="nw", image=self._imgs[0])
+        self.create_text(W / 2, H / 2 - 12, text=icon, font=F.icon_lg, fill=ACCENT)
+        self.create_text(W / 2, H / 2 + 22, text=text, font=F.small_sb, fill=TEXT_2)
+        self.bind("<Enter>", lambda e: self.itemconfigure(self._bgid, image=self._imgs[1]))
+        self.bind("<Leave>", lambda e: self.itemconfigure(self._bgid, image=self._imgs[0]))
+        self.bind("<ButtonRelease-1>", lambda e: command())
+
+
 class ScrollArea(tk.Frame):
     """Área con scroll vertical y una barra fina propia (se oculta si no hace falta)."""
 
@@ -691,6 +1024,21 @@ _dwm = ctypes.WinDLL("dwmapi")
 _dwm.DwmSetWindowAttribute.restype = ctypes.c_long
 _dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p,
                                        wintypes.DWORD]
+
+
+_u32.GetForegroundWindow.restype = wintypes.HWND
+_u32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+
+def foreground():
+    return _u32.GetForegroundWindow()
+
+
+def restore_foreground(hwnd):
+    """Crear el Tk root lo activa un instante: se le devuelve el foco a quien lo
+    tenía (funciona porque la app deja el bloqueo de foco de Windows en 0)."""
+    if hwnd and _u32.GetForegroundWindow() != hwnd:
+        _u32.SetForegroundWindow(hwnd)
 
 
 def hwnd_of(win):

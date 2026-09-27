@@ -81,6 +81,7 @@ class Transcriber:
     def __init__(self, config):
         self.config = config
         self._model = None
+        self.device = "GPU"
 
     def load(self):
         from faster_whisper import WhisperModel
@@ -88,9 +89,11 @@ class Transcriber:
         print(f"  STT: {self.config.whisper_model} | {dev.upper()} {comp}")
         try:
             self._model = WhisperModel(self.config.whisper_model, device=dev, compute_type=comp)
+            self.device = "GPU" if dev == "cuda" else "CPU"
         except Exception as e:
             print(f"  GPU no disponible ({e}); uso CPU.")
             self._model = WhisperModel(self.config.whisper_model, device="cpu", compute_type="int8")
+            self.device = "CPU"
         # warmup
         silence = np.zeros(self.config.sample_rate, dtype=np.float32)
         list(self._model.transcribe(silence, language=self.config.whisper_language or None)[0])

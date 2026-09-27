@@ -1,22 +1,28 @@
-# Dictalo — guía del proyecto
+# Dictado App: guía del proyecto
 
 App de dictado por voz para Windows (clon de Wispr Flow). 100% Python. Local, privado, gratis.
 El dueño (Ivo) escribe en español → **respondé siempre en español**.
 
 > **Para retomar:** este archivo se carga solo al abrir la carpeta. Leé todo antes de tocar nada.
-> Dictalo **reemplazó** a una app vieja ("Dictation App") que ya **se eliminó**. Dictalo es 100% autónomo:
-> tiene su propio `.venv`, su propio repo git y todo el código en esta carpeta.
+> La app **se llamaba "Dictalo"** hasta la v1.0.0; en la v1.1.0 pasó a **"Dictado App"** (nombre, ícono,
+> repo `ivorojas/dictado-app`). La carpeta local sigue llamándose `Dictalo` (solo el nombre de la carpeta).
+> Es 100% autónoma: su propio `.venv`, su propio repo git y todo el código acá.
 
 ## Qué hace
 Tap **F9** → grabás (aparece un overlay flotante con el espectro de tu voz) → tap **F9** de nuevo →
-Whisper transcribe local en GPU → **pega el texto en el campo donde estás** (cualquier app). Corre
+Whisper transcribe local en GPU → **pega el texto en el campo donde estás al cortar** (cualquier app). Corre
 siempre en 2do plano (ícono en la barra), arranca con Windows.
 
 ## Comandos
 - **Correr en dev (con consola/logs):** `.venv\Scripts\python.exe main.py`
-- **Compilar el .exe:** `.venv\Scripts\pyinstaller.exe dictalo.spec --noconfirm` → `dist\Dictalo\`
-- **Instalador:** `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss` → `Output\Dictalo-Setup.exe`
-- **Actualizar la instalada sin reinstalar:** después de compilar, `cp -rf dist/Dictalo/* "%LOCALAPPDATA%\Programs\Dictalo\"`
+- **Compilar el .exe:** `.venv\Scripts\pyinstaller.exe dictado.spec --noconfirm` → `dist\DictadoApp\`
+- **Autotest de la interfaz del .exe:** `dist\DictadoApp\DictadoApp.exe --selftest-ui` → escribe
+  `[selftest] interfaz OK` en `%TEMP%\dictado-selftest.log` (arma Ajustes/Historial sin mostrarlos; no toca datos).
+- **Instalador:** `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss` → `Output\DictadoApp-Setup.exe`
+- **Actualizar la instalada sin reinstalar:** cerrar la app y `cp -rf dist/DictadoApp/* "%LOCALAPPDATA%\Programs\Dictado App\"`
+- **Íconos / imágenes del README:** `assets\render_icon.py` (icono.ico + icon.png), `assets\render.py` (overlay),
+  `assets\capture_ui.py` (capturas reales de Ajustes/Historial con datos de ejemplo).
+- **Versión:** está en `brand.py` (`__version__`) y en `installer.iss` (`AppVersion`): mantenerlas iguales.
 - Cerrar la app: ícono en la barra → Salir.
 
 > ⚠️ **El venv propio vive en `.venv`** (tiene faster-whisper, CUDA libs, pyinstaller). Está gitignoreado.
@@ -25,26 +31,29 @@ siempre en 2do plano (ícono en la barra), arranca con Windows.
 
 ## Arquitectura (archivos)
 ```
-main.py        — entry point. Tray (pystray) + state machine + hotkey + wiring. Hilo principal corre
-                 el overlay (tkinter mainloop); tray en run_detached(); listener pynput y worker STT en hilos.
-config.py      — Config dataclass. Carga ~/.dictalo/prefs.json. Incluye vocabulario editable.
-recorder.py    — captura mic 16kHz (sounddevice). Calcula nivel + espectro FFT en vivo para el overlay.
-transcriber.py — STT faster-whisper large-v3-turbo en CUDA int8. Detección de idioma acotada a en/es.
-                 Cierra el texto con punto final. _register_cuda_dlls() carga las DLLs CUDA.
-injector.py    — pega el texto: foco a la ventana destino + clipboard + Ctrl+V (con scan codes).
-cleaner.py     — limpieza opcional con Gemini (OFF por defecto; el dueño NO usa IA).
-overlay.py     — overlay flotante (tkinter topmost, NOACTIVATE, click-through). Barras = espectro real.
-splash.py      — tarjeta de carga centrada mientras carga el modelo (se cierra sola al estar listo).
-settings.py    — ventana de Ajustes (tema oscuro): mic, atajo, vocabulario, historial de respaldo.
-history.py     — guarda los últimos 12 dictados en ~/.dictalo/history.json (respaldo si no pegó).
-sounds.py      — sonidos suaves sintetizados (numpy+sounddevice), reemplazan winsound.Beep.
-dictalo.spec   — build PyInstaller (windowed, bundlea faster-whisper + DLLs nvidia).
-installer.iss  — Inno Setup (instala en %LOCALAPPDATA%\Programs\Dictalo, shortcuts, startup).
-icono.ico      — ícono verde-agua.
+main.py        entry point. Tray (pystray) + state machine + hotkey + wiring. Hilo principal corre
+               el overlay (tkinter mainloop); tray en run_detached(); listener pynput y worker STT en hilos.
+brand.py       nombre (APP_NAME), versión e ícono dibujado con PIL (3 barras pixel-perfect <40px, 5 barras >=40).
+config.py      Config dataclass. Datos en ~/.dictado (prefs.json). Migra ~/.dictalo (versión vieja) al arrancar.
+recorder.py    captura mic 16kHz (sounddevice). Nivel + espectro FFT en vivo para el overlay; pico/RMS por dictado.
+transcriber.py STT faster-whisper large-v3-turbo en CUDA int8 (fallback CPU). Idioma acotado a en/es.
+               Colchón de silencio al final, filtro de alucinaciones de subtítulos, punto final + espacio.
+injector.py    pega el texto: foco a la ventana destino + clipboard + Ctrl+V (con scan codes).
+cleaner.py     limpieza opcional con Gemini (OFF; el dueño NO usa IA; oculta en Ajustes pero sigue en config).
+overlay.py     overlay flotante (tkinter topmost, NOACTIVATE, click-through). Barras = espectro real.
+splash.py      tarjeta de carga centrada mientras carga el modelo (se cierra sola al estar listo).
+ui.py          kit de interfaz: tema, fuentes Segoe UI Variable + íconos Segoe Fluent, formas suavizadas
+               (PIL 4x → PhotoImage), Card/Button/Chip/Tag/TagCloud/Field/Select/ScrollArea, barra de título DWM.
+settings.py    ventanas de Ajustes e Historial (guardado automático, atajo en vivo, historial con búsqueda).
+history.py     dictados con fecha en ~/.dictado/history.json; se borran solos a los 3 días (RETENTION_DAYS).
+sounds.py      sonidos suaves sintetizados (numpy+sounddevice).
+dictado.spec   build PyInstaller (windowed, bundlea faster-whisper + DLLs nvidia, ficha de versión del .exe).
+installer.iss  Inno Setup: instala en %LOCALAPPDATA%\Programs\Dictado App, accesos, inicio con Windows.
+icono.ico      ícono (degradé cian→violeta con barras de onda), generado por assets\render_icon.py.
 ```
 
-## Decisiones técnicas y gotchas (CRÍTICO — leer antes de tocar injector/overlay)
-- **EL BUG QUE COSTÓ TODO — `SendInput` fallaba en silencio**: la estructura `INPUT` debe medir **40 bytes
+## Decisiones técnicas y gotchas (CRÍTICO, leer antes de tocar injector/overlay/ui)
+- **EL BUG QUE COSTÓ TODO, `SendInput` fallaba en silencio**: la estructura `INPUT` debe medir **40 bytes
   en x64**. La `union` tenía solo `KEYBDINPUT` (32 bytes) → `SendInput` rechazaba la llamada (devolvía 0) y
   NO inyectaba nada, nunca, en ningún lado. El fix: incluir `MOUSEINPUT` en la union (el miembro más grande)
   para que mida 40. **Verificar siempre `ctypes.sizeof(_INPUT) == 40`.** Esto explicó semanas de "no pega".
@@ -57,57 +66,68 @@ icono.ico      — ícono verde-agua.
   el foco cambió durante la transcripción (`ForegroundLockTimeout=0` + ALT-tap + `AttachThreadInput`).
 - **Hotkey = hook LL de Windows**: pynput llama al callback DENTRO del hook. Nada lento ahí (abrir el mic de
   la interfaz USB tarda) ni excepciones: Windows da de baja el hook en silencio / pynput frena el listener →
-  F9 muerto. Por eso el hook solo hace `_toggles.put()` y `_toggle_worker` procesa en otro hilo.
+  F9 muerto. Por eso el hook solo hace `_toggles.put()` y `_toggle_worker` procesa en otro hilo. Cambiar el
+  atajo desde Ajustes re-arma el listener en vivo (`_hotkey_changed`).
 - **Mic = interfaz USB Focusrite** ("Analogue 1 + 2"): a veces entrega **silencio digital** (tras suspender,
   si otra app toma el dispositivo). Síntoma en el log: `[stt] proceso 0.01s` con audio de varios segundos y
   `[stt] ''`. Ahora: `pico < 1e-5` → refresh de PortAudio + sonido de error + notificación; aviso a los 3s si
-  sigue muerto; si el VAD descarta todo, reintento con VAD sensible (threshold 0.25). El log registra
-  pico/RMS y nombre del mic por dictado.
+  sigue muerto; si el VAD descarta todo, reintento con VAD sensible (threshold 0.25).
 - **Portapapeles**: `OpenClipboard` se reintenta (otra app puede tenerlo tomado); si falla, no se pega y se
   avisa (el texto queda en Historial). Se restaura a 1s (apps lentas leían tarde y pegaban lo viejo).
 - **ctypes 64-bit**: TODA llamada Win32 que devuelve/recibe HANDLE/puntero lleva `restype`/`argtypes`
-  explícitos. Sin esto el puntero se trunca a 32 bits → "access violation writing 0x0".
-- **DLLs CUDA**: el wheel de ctranslate2 NO trae cuBLAS/cuDNN. Vienen de `nvidia-*-cu12` (requirements) y
-  `transcriber._register_cuda_dlls()` las registra en el DLL search path (usa `sys._MEIPASS` si frozen).
+  explícitos. `ui.py` usa su propia `ctypes.WinDLL("user32")` para no pisar los prototipos de injector.py.
+- **tkinter, nombres prohibidos en subclases de widgets**: `self._w` (es el path interno del widget) y
+  `self._register` (lo usa `after()`). Pisarlos rompe todo con errores rarísimos. Ya pasó con los dos.
+- **Tk no suaviza bordes**: toda forma redondeada se renderiza con PIL a 4× → `ui.shape()` (cacheada; cada
+  widget guarda su PhotoImage para que el caché pueda vaciarse sin borrar nada en pantalla).
+- **Barra de título**: `ui.style_window` pinta la barra nativa del color de la ventana vía DWM (atributos 20,
+  34, 35, 36; Windows 11). Se muestra con alpha 0 → estilo → alpha 1, así no hay parpadeo blanco.
+- **Previsualizar la UI sin molestar al dueño**: fuera de pantalla Windows NO pinta frames/canvas de Tk (salen
+  negros). Lo que funciona (ver `assets/capture_ui.py`): ventana en pantalla con alpha 0 + click-through +
+  NOACTIVATE, foto con `PrintWindow(PW_RENDERFULLCONTENT)`. Al mapearse Windows la activa ~25 ms (el lock de
+  foco está en 0 por la app): se devuelve el foco en el acto. **Nunca usar datos reales del dueño** en capturas.
 - **pythonw / stdout**: en el .exe (sin consola) `sys.stdout` es None → cualquier print mata la app.
-  `main._setup_stdio()` redirige a `~/.dictalo/dictalo.log` (line-buffered). **Para diagnosticar: leer ese log.**
+  `main._setup_stdio()` redirige a `~/.dictado/dictado.log` (append, tope 2MB). **Para diagnosticar: ese log.**
+- **Migración Dictalo → Dictado App**: al arrancar, `config.migrate_legacy_data()` renombra `~/.dictalo` a
+  `~/.dictado` (si está en uso, copia prefs/history). OJO: importar `main.py` la dispara; en pruebas no
+  importarlo con la app vieja abierta. `~/.dictado-app` son restos de la app ANTERIOR a Dictalo (no usar).
+- **Instalador**: mantiene el `AppId` de Dictalo (`{{D1C7A10E-...-DICTALOAPP001}}`, tal cual) para
+  ACTUALIZAR la instalación vieja; `[InstallDelete]` borra su carpeta y accesos; `AppMutex` pide cerrarla.
+- **Instancia única**: mutex `Global\DictadoApp_SingleInstance`; además no arranca si está abierta la vieja
+  (`Global\Dictalo_SingleInstance`), porque pelearían por el atajo.
 - **Overlay sin robar foco**: estilos `WS_EX_NOACTIVATE | WS_EX_TRANSPARENT` aplicados al HWND top-level real
   (`GetAncestor(GA_ROOT)`), mostrar vía alpha (no deiconify). Así no roba el foco y el Ctrl+V cae en tu campo.
-- **Instancia única**: named mutex `Global\Dictalo_SingleInstance` en main. Sin esto se apilan instancias y
-  se pisan en el hotkey.
 - **Arranque instantáneo**: el modelo carga + warmup del mic en un hilo de fondo; el tray aparece al toque.
-  El delay de ~6s al abrir es cargar el modelo en VRAM — **se resuelve con el auto-arranque** (queda caliente).
-- **Auto-arranque**: hay un shortcut en la carpeta Startup de Windows → Dictalo arranca con la PC. Por eso
-  después de reiniciar es instantáneo (siempre corriendo, como Wispr).
-- **Modelo STT**: large-v3-turbo, CUDA int8, `beam_size=5` (precisión), `hotwords=vocabulario`,
-  `condition_on_previous_text=False`. RTX 3070 del dueño → sub-segundo por dictado.
-- **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF (el dueño no lo quiere).
+  El delay de ~6s al abrir es cargar el modelo en VRAM; **se resuelve con el auto-arranque** (queda caliente).
+- **Modelo STT**: large-v3-turbo, CUDA int8, `beam_size=5`, `hotwords=vocabulario`,
+  `condition_on_previous_text=False`. RTX 3070 del dueño → ~0.45 s por dictado corto (36% es detectar idioma).
+  Medido: int8_float16/float16 no mejoran nada; nuestros cambios no afectan la precisión. Pesa la distancia al mic.
+- **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.
 
-## Estado actual (MVP funcional y verificado andando)
-Funciona end-to-end: dicta, transcribe perfecto, pega en cualquier app, overlay con espectro, sonidos suaves,
-splash, historial, ajustes, vocabulario, auto-arranque, idioma en/es, punto final.
+## Estado actual (v1.1.0)
+Funciona end-to-end: dicta, transcribe, pega donde cortás, overlay con espectro, sonidos, splash, avisos si el
+mic no capta o no se pudo pegar, Ajustes rediseñados (guardado automático), historial de 3 días con ventana
+propia y búsqueda, vocabulario en etiquetas con "Ver más", auto-arranque, idioma en/es.
 
 ## Cómo verificar (sin poder hablar)
 El asistente NO puede usar la voz ni ver la pantalla del dueño. Para validar:
-- Compilar y hacer smoke-test: lanzar el .exe, esperar ~17s, leer `~/.dictalo/dictalo.log` → debe llegar a
-  "Listo para dictar. ✓" sin Traceback.
-- Verificaciones de API se pueden correr (ej. `ctypes.sizeof(_INPUT)==40`, `SendInput` devuelve >0).
-- Lo demás (que pegue, calidad de audio, diseño) lo prueba el dueño y reporta.
+- Compilar + autotest de interfaz (`--selftest-ui`) + smoke-test: lanzar el .exe, leer
+  `~/.dictado/dictado.log` → debe llegar a "Listo para dictar. ✓" sin Traceback.
+- Diseño: `assets/capture_ui.py` (o un visor igual) genera capturas reales con datos de ejemplo.
+- Verificaciones de API se pueden correr (ej. `ctypes.sizeof(_INPUT)==40`).
+- Lo demás (que pegue, calidad de audio) lo prueba el dueño y reporta.
 
 ## Ideas a futuro (discutidas)
-El dueño YA RECHAZÓ por ahora: limpieza con IA, modo comando, tono por app, reemplazos/snippets, preview toast.
-Le interesó y ya está hecho: punto final + espacio al final, normalización de espacios del transcript,
-idioma en/es, sensibilidad de barras, historial, doble-clic abre Ajustes, CLAUDE.md/docs, venv propio
-(la carpeta vieja ya se eliminó), resiliencia ante suspensión/resume (watchdog re-arma el hotkey + refresh
-de audio + overlay reaplica estilos al mostrarse; log en modo append), y **publicación**: repo **PÚBLICO**
-`ivorojas/Dictalo` con README (inglés) + imágenes del overlay (`assets/`, se generan con `assets/render.py`)
-+ release v1.0.0 (instalador ~1GB con CUDA). Licencia MIT.
-Roadmap público (en README): aceleración GPU AMD/Intel (whisper.cpp+Vulkan), port a macOS. Mac se sacó del
-README a pedido (hoy es Windows-only; en AMD/sin-NVIDIA corre pero en CPU vía el fallback de transcriber).
+El dueño YA RECHAZÓ por ahora: limpieza con IA, modo comando, tono por app, reemplazos/snippets, preview toast,
+detectar el idioma mientras habla (más rápido pero no garantiza igual precisión; pidió solo mejoras objetivas).
+Hecho: punto final + espacio, normalización de espacios, idioma en/es, historial, resiliencia a suspensión,
+colchón de silencio + filtro de alucinaciones, pegado robusto, rediseño completo de Ajustes/Historial, ícono y
+nombre nuevos, publicación: repo **PÚBLICO** `ivorojas/dictado-app` (README en inglés, MIT, releases).
+Roadmap público: aceleración GPU AMD/Intel (whisper.cpp+Vulkan). Mac se sacó a pedido (Windows-only).
 
 ## Convenciones
 - Responder siempre en español. Mensajes de usuario en la app, en español.
-- Sin comentarios obvios. Código limpio y consistente con el existente.
-- Verificar (compilar + smoke-test del .exe + leer el log) antes de reportar algo como hecho.
-- Tras cambiar código: recompilar y pisar la instalada (`cp dist/Dictalo/* a %LOCALAPPDATA%\Programs\Dictalo`).
+- Sin comentarios obvios. Código limpio y consistente con el existente. Títulos de la UI sin guiones.
+- Verificar (compilar + autotest + smoke-test del .exe + leer el log) antes de reportar algo como hecho.
+- Tras cambiar código: recompilar y pisar la instalada (`%LOCALAPPDATA%\Programs\Dictado App`).
   Si no, el dueño sigue usando la versión vieja (pasó muchas veces: "no se ejecutaba en la que usaba").

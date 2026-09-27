@@ -1,26 +1,30 @@
-<h1 align="center">Dictalo</h1>
+<p align="center">
+  <img src="assets/icon.png" width="96" alt="Dictado App icon">
+</p>
+
+<h1 align="center">Dictado App</h1>
 
 <p align="center">
-  <b>Voice dictation for Windows.</b> Press <kbd>F9</kbd>, speak, press <kbd>F9</kbd> again —
+  <b>Voice dictation for Windows.</b> Press <kbd>F9</kbd>, speak, press <kbd>F9</kbd> again:
   your words are typed into whatever app you're using.
 </p>
 
 <p align="center">
-  <b>100% local</b> · <b>private</b> · <b>free & open source</b> · GPU-accelerated (NVIDIA)
+  <b>100% local</b> · <b>private</b> · <b>free & open source</b> · GPU accelerated (NVIDIA)
 </p>
 
 <p align="center">
-  <img src="assets/overlay-recording.png" width="440" alt="Dictalo recording overlay with live voice spectrum">
+  <img src="assets/overlay-recording.png" width="440" alt="Recording overlay with live voice spectrum">
 </p>
 
 ---
 
 ## What it is
 
-Dictalo is a free, local, open-source dictation app for Windows — a clone of [Wispr Flow](https://wisprflow.ai).
-Tap <kbd>F9</kbd> to start recording (a floating overlay shows your voice spectrum in real time), tap <kbd>F9</kbd>
-again, and [OpenAI's Whisper](https://github.com/openai/whisper) transcribes **on your own GPU** and pastes the
-text into the field you're in — **any app**: browser, chat, editor, IDE.
+Dictado App is a free, local, open source dictation app for Windows, in the spirit of
+[Wispr Flow](https://wisprflow.ai). Tap <kbd>F9</kbd> to start recording (a floating overlay shows your voice
+spectrum in real time), tap <kbd>F9</kbd> again, and [OpenAI's Whisper](https://github.com/openai/whisper)
+transcribes **on your own GPU** and pastes the text into the field you're in: browser, chat, editor, IDE, **any app**.
 
 It lives in the system tray, starts with Windows, and stays out of your way.
 
@@ -32,71 +36,79 @@ It lives in the system tray, starts with Windows, and stays out of your way.
 |:---:|:---:|
 | <img src="assets/overlay-recording.png" width="320" alt="Recording"> | <img src="assets/overlay-processing.png" width="320" alt="Processing"> |
 
-The overlay floats on top, is click-through, and never steals focus — so the paste lands exactly where your cursor was.
+The overlay floats on top, is click-through and never steals focus, so the paste lands exactly where your cursor is.
 
 ## Features
 
-- ⚡ **Real-time local transcription** — Whisper `large-v3-turbo` on your GPU (sub-second on an RTX 3070)
+- ⚡ **Real-time local transcription** with Whisper `large-v3-turbo` on your GPU (sub-second on an RTX 3070)
 - 🌎 **Spanish + English** with automatic language detection
-- 📋 **Pastes into any app** — works even in Chromium/Electron apps (Slack, Discord, browsers) via real scan-code <kbd>Ctrl</kbd>+<kbd>V</kbd>
-- 🎛️ **Floating overlay** with a live voice spectrum
-- 🗣️ **Custom vocabulary** — feed it names and terms so Whisper nails the words you actually use
-- 🔒 **100% offline** — private by design, nothing is uploaded
-- 🧰 **Tray icon, autostart, backup history, gentle sounds, settings window**
-- 💤 **Resilient to sleep/resume** — re-arms the hotkey and refreshes audio after your PC wakes up
+- 📋 **Pastes into any app**, including Chromium/Electron apps (Slack, Discord, browsers), via real scan-code <kbd>Ctrl</kbd>+<kbd>V</kbd>
+- 🎯 **Pastes where you finish**: click another field while you talk and the text goes there
+- 🗣️ **Custom vocabulary**: names and terms you use often, so Whisper writes them right
+- 🕘 **Backup history** of your last 3 days of dictations, searchable, one click to copy (older ones are deleted automatically)
+- 🔒 **100% offline**: private by design, nothing is uploaded
+- 🔔 **Clear feedback**: sound + notification if the mic captured nothing or a paste failed, instead of silently doing nothing
+- 💤 **Resilient to sleep/resume**: re-arms the hotkey and refreshes audio after your PC wakes up
+
+## Settings
+
+Double-click the tray icon. Everything saves on its own, and changes apply instantly (no restart).
+
+<p align="center">
+  <img src="assets/settings.png" width="460" alt="Settings: microphone, hotkey, vocabulary and history">
+  &nbsp;
+  <img src="assets/history.png" width="460" alt="History window: searchable dictations grouped by day">
+</p>
+
+- **Microphone** and **hotkey** (<kbd>F9</kbd>, <kbd>F8</kbd>, <kbd>F10</kbd>, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>)
+- **Vocabulary** as tags: add with <kbd>Enter</kbd> (paste a comma separated list to add many), remove with ✕
+- **History**: your latest dictations at a glance, and **See all** opens a window with search and copy for each one
+
+> Screenshots use sample data.
 
 ## Requirements
 
 - **Windows 10/11** (64-bit)
 - A **microphone**
-- **GPU:** an **NVIDIA** card (CUDA) for real-time speed. No NVIDIA? Dictalo automatically falls back to **CPU** — it still works, just slower.
+- **GPU:** an **NVIDIA** card (CUDA) for real-time speed. Without one, Dictado App falls back to **CPU** automatically: it still works, just slower.
 
 ## Install
 
-1. Download the latest **`Dictalo-Setup.exe`** from the [Releases](../../releases) page.
-2. Run it. Dictalo installs to `%LOCALAPPDATA%\Programs\Dictalo`, adds a Start Menu shortcut and starts with Windows.
-3. First launch loads the model into memory (~a few seconds). After that it's always warm.
+1. Download the latest **`DictadoApp-Setup.exe`** from the [Releases](../../releases) page.
+2. Run it. It installs to `%LOCALAPPDATA%\Programs\Dictado App`, adds a Start Menu shortcut and starts with Windows.
+3. The first launch loads the model into memory (a few seconds). After that it's always warm.
 
-> The installer is large (~1 GB) because it bundles the CUDA runtime so it works out of the box on NVIDIA GPUs.
+> The installer is large (~1 GB) because it bundles the CUDA runtime, so it works out of the box on NVIDIA GPUs.
+>
+> **Upgrading from Dictalo?** That was this app's previous name. The installer replaces it and keeps your vocabulary and history.
 
 ## Usage
 
-- **Tap <kbd>F9</kbd>** to start recording → **tap <kbd>F9</kbd>** again to stop. The text is pasted where your cursor is.
-- **Double-click the tray icon** to open **Settings**: microphone, hotkey, custom vocabulary, and backup history.
-- Quit from the tray icon → **Salir**.
-
-## Settings
-
-Double-click the tray icon to open **Settings** — pick your microphone and hotkey, edit your
-**custom vocabulary** (applied instantly, no restart), and recover recent dictations from the
-**backup history** if a paste ever misses.
-
-<p align="center">
-  <img src="assets/settings.png" width="440" alt="Dictalo settings window (dark theme): microphone, hotkey, vocabulary and backup history">
-</p>
-
-> The screenshot uses sample data.
+- **Tap <kbd>F9</kbd>** to start recording, **tap <kbd>F9</kbd>** again to stop. The text is pasted where your cursor is.
+- **Double-click the tray icon** to open Settings.
+- Quit from the tray icon: **Salir**.
 
 ## Build from source
 
 Requires **Python 3.14** (64-bit) and an NVIDIA GPU for the CUDA path.
 
 ```bash
-# 1. Create the virtual environment and install dependencies (~2-3 GB: faster-whisper, CUDA libs, PyInstaller)
+# 1. Virtual environment + dependencies (~2-3 GB: faster-whisper, CUDA libs, PyInstaller)
 py -3.14 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 
 # 2. Run in dev (with console logs)
 .venv\Scripts\python.exe main.py
 
-# 3. Build the standalone .exe  ->  dist\Dictalo\
-.venv\Scripts\pyinstaller.exe dictalo.spec --noconfirm
+# 3. Build the standalone .exe  ->  dist\DictadoApp\
+.venv\Scripts\pyinstaller.exe dictado.spec --noconfirm
 
-# 4. (optional) Build the installer  ->  Output\Dictalo-Setup.exe   (needs Inno Setup 6)
+# 4. (optional) Build the installer  ->  Output\DictadoApp-Setup.exe   (needs Inno Setup 6)
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
 The Whisper model is cached separately in `~/.cache/huggingface` (downloaded once, shared across builds).
+Icon and screenshots are generated by the scripts in `assets/`.
 
 ## How it works
 
@@ -109,32 +121,33 @@ The Whisper model is cached separately in `~/.cache/huggingface` (downloaded onc
 | `transcriber.py` | Whisper via [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on CUDA (int8), CPU fallback |
 | `injector.py` | Pastes text: refocuses your window + clipboard + scan-code Ctrl+V |
 | `overlay.py` | Floating, click-through, top-most overlay (Win32 layered window) |
-| `settings.py` | Settings window (mic, hotkey, vocabulary, history) |
-| `config.py` · `history.py` · `sounds.py` · `splash.py` | Preferences, backup history, sounds, load splash |
+| `settings.py` · `ui.py` | Settings and History windows, on a small UI kit with anti-aliased shapes and Windows 11 fonts and icons |
+| `brand.py` | Name, version and the icon (drawn in code, pixel-aligned for tiny tray sizes) |
+| `config.py` · `history.py` · `sounds.py` · `splash.py` | Preferences, backup history, sounds, loading splash |
 
-Whisper is OpenAI's open-source model (MIT). Dictalo runs it locally through faster-whisper — **the OpenAI API is never called**.
+Whisper is OpenAI's open source model (MIT). Dictado App runs it locally through faster-whisper: **the OpenAI API is never called**.
 
 ## Compatibility
 
-| Platform | Status |
+Dictado App is **Windows only**. It relies on native Windows APIs for text injection, the overlay and the hotkey.
+
+| Setup | Status |
 |---|---|
-| **Windows + NVIDIA GPU** | ✅ Full speed (CUDA / GPU) |
-| **Windows + AMD/Intel/no GPU** | ✅ Works on **CPU** (slower — GPU acceleration is on the roadmap) |
-| **macOS / Linux** | ❌ Not supported yet — Dictalo relies on native Windows APIs (text injection, overlay, hotkey). A port is welcome as a contribution. |
+| **Windows + NVIDIA GPU** | ✅ Full speed (CUDA) |
+| **Windows + AMD / Intel / no GPU** | ✅ Works on **CPU** (slower) |
 
 ## Roadmap
 
 - 🎮 **AMD/Intel GPU acceleration** via whisper.cpp + Vulkan
-- 🍎 **macOS port** (rewrite of the native layers + Metal STT backend)
 
 ## Privacy
 
 Everything runs on your machine. Audio is captured, transcribed locally, and discarded. The only network access
-Dictalo needs is a **one-time model download** on first run. There is no telemetry and no account.
+Dictado App needs is a **one-time model download** on first run. There is no telemetry and no account.
 
 ## Credits & license
 
-- [OpenAI Whisper](https://github.com/openai/whisper) — the speech recognition model (MIT)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — fast local inference (MIT)
+- [OpenAI Whisper](https://github.com/openai/whisper): the speech recognition model (MIT)
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper): fast local inference (MIT)
 
 Released under the [MIT License](LICENSE).

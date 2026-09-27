@@ -1,11 +1,32 @@
-"""Config de Dictalo — voz a texto para Windows."""
+"""Config de Dictado App (voz a texto para Windows)."""
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-APP_DIR = Path.home() / ".dictalo"
+APP_DIR = Path.home() / ".dictado"
 PREFS_PATH = APP_DIR / "prefs.json"
+_LEGACY_DIR = Path.home() / ".dictalo"   # la app antes se llamaba "Dictalo"
+
+
+def migrate_legacy_data():
+    """Trae los datos de la versión anterior (vocabulario, historial, log). Si la
+    carpeta vieja está en uso y no se puede mover, copia lo esencial."""
+    if APP_DIR.exists() or not _LEGACY_DIR.is_dir():
+        return
+    try:
+        _LEGACY_DIR.rename(APP_DIR)
+        old_log = APP_DIR / "dictalo.log"
+        if old_log.exists():
+            old_log.rename(APP_DIR / "dictado.log")
+    except OSError:
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        for name in ("prefs.json", "history.json"):
+            try:
+                shutil.copy2(_LEGACY_DIR / name, APP_DIR / name)
+            except OSError:
+                pass
 
 
 @dataclass

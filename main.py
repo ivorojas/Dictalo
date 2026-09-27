@@ -1,6 +1,6 @@
 """
-Dictalo — dictado por voz para Windows
-======================================
+Dictado App: dictado por voz para Windows
+=========================================
 Tap F9 → grabás (overlay flotante) → tap F9 → Whisper transcribe → pega en tu campo.
 Corre en 2do plano (tray). Ajustes desde el ícono.
 """
@@ -13,6 +13,13 @@ import time
 import winsound
 from datetime import datetime
 
+from config import APP_DIR, migrate_legacy_data
+
+# El autotest no toca los datos del usuario (ni migra ni escribe en ~/.dictado).
+_SELFTEST = "--selftest-ui" in sys.argv
+if not _SELFTEST:
+    migrate_legacy_data()   # antes de abrir el log: la carpeta de datos puede moverse
+
 
 def _setup_stdio():
     """Sin consola (app .exe) sys.stdout es None → cualquier print mata la app.
@@ -20,9 +27,13 @@ def _setup_stdio():
     reinicios — clave para diagnosticar fallas tras suspender; con un tope de
     tamaño para que no crezca sin límite."""
     if sys.stdout is None or sys.stderr is None:
-        d = os.path.join(os.path.expanduser("~"), ".dictalo")
+        if _SELFTEST:
+            import tempfile
+            d, name = tempfile.gettempdir(), "dictado-selftest.log"
+        else:
+            d, name = str(APP_DIR), "dictado.log"
         os.makedirs(d, exist_ok=True)
-        p = os.path.join(d, "dictalo.log")
+        p = os.path.join(d, name)
         try:
             if os.path.getsize(p) > 2_000_000:
                 os.replace(p, p + ".old")
@@ -39,18 +50,28 @@ def _setup_stdio():
 
 
 def _already_running():
-    ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\Dictalo_SingleInstance")
-    return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    k = ctypes.windll.kernel32
+    k.CreateMutexW(None, False, "Global\\DictadoApp_SingleInstance")
+    if k.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
+        return True
+    # La versión anterior ("Dictalo") abierta a la vez pelearía por el mismo atajo.
+    k.OpenMutexW.restype = ctypes.c_void_p
+    h = k.OpenMutexW(0x00100000, False, "Global\\Dictalo_SingleInstance")   # SYNCHRONIZE
+    if h:
+        k.CloseHandle(ctypes.c_void_p(h))
+        return True
+    return False
 
 
 _setup_stdio()
 
-from PIL import Image, ImageDraw
 import pystray
 from pynput import keyboard as kb
 
 import sounds
 import history
+import ui
+from brand import APP_NAME, __version__, make_tray_icon
 from config import Config
 from recorder import Recorder
 from transcriber import Transcriber
@@ -61,30 +82,37 @@ from splash import Splash
 from settings import open_settings
 
 
-def _icon(recording=False):
-    s = 64
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    color = (235, 70, 70, 255) if recording else (40, 200, 160, 255)  # rojo / verde-agua
-    d.ellipse([5, 5, s - 5, s - 5], fill=color)
-    # micrófono
-    d.rounded_rectangle([s * 0.40, s * 0.24, s * 0.60, s * 0.56], radius=s * 0.1, fill=(255, 255, 255, 235))
-    d.rectangle([s * 0.47, s * 0.54, s * 0.53, s * 0.70], fill=(255, 255, 255, 235))
-    d.rectangle([s * 0.38, s * 0.70, s * 0.62, s * 0.74], fill=(255, 255, 255, 235))
-    return img
+def _selftest_ui():
+    """`DictadoApp.exe --selftest-ui`: arma Ajustes e Historial con datos de ejemplo,
+    sin mostrarlos, y anota el resultado en el log. Verifica la interfaz del .exe."""
+    import tkinter as tk
+    import traceback
+    from settings import selftest
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        selftest(root)
+        print("[selftest] interfaz OK")
+    except Exception as e:
+        traceback.print_exc()
+        print(f"[selftest] FALLÓ: {e}")
+    finally:
+        root.destroy()
 
 
 _DEAD_PEAK = 1e-5   # ≈ -100 dBFS: por debajo, el mic entregó silencio digital (stream "muerto")
 
 
 def main():
+    if _SELFTEST:
+        return _selftest_ui()
     if _already_running():
         winsound.Beep(300, 200)
         return
 
     config = Config()
     print("=" * 40)
-    print(f"  Dictalo — inicio {datetime.now():%Y-%m-%d %H:%M:%S}")
+    print(f"  {APP_NAME} {__version__} · inicio {datetime.now():%Y-%m-%d %H:%M:%S}")
     print(f"  Atajo: {config.hotkey_display}  | Cleanup: {'ON' if config.cleanup_enabled else 'OFF'}")
     print("=" * 40)
 
@@ -94,15 +122,18 @@ def main():
     injector = Injector()
     overlay = Overlay()
     overlay.get_bands = lambda: recorder.bands   # barras = espectro real de tu voz
+    ui.init(overlay.root)
 
     _busy = threading.Event()
     _ready = threading.Event()
     _target = {"hwnd": 0}
     _icon_ref = {"icon": None}
+    _tray = {False: make_tray_icon(False), True: make_tray_icon(True)}
 
     def _warmup():
         transcriber.load()
         recorder.warmup()
+        history.get()          # de paso, borra lo que ya venció
         _ready.set()
         print("Listo para dictar. ✓")
         sounds.ready()
@@ -113,14 +144,14 @@ def main():
     def set_rec_icon(v):
         ic = _icon_ref["icon"]
         if ic:
-            ic.icon = _icon(v)
-            ic.title = "Dictalo — grabando" if v else "Dictalo"
+            ic.icon = _tray[v]
+            ic.title = f"{APP_NAME} (grabando)" if v else APP_NAME
 
     def _notify(msg):
         ic = _icon_ref["icon"]
         if ic:
             try:
-                ic.notify(msg, "Dictalo")
+                ic.notify(msg, APP_NAME)
             except Exception:
                 pass
 
@@ -263,21 +294,35 @@ def main():
                     recorder.refresh()
     threading.Thread(target=_watchdog, daemon=True).start()
 
+    def _hotkey_changed():
+        """Ajustes cambió el atajo: se re-arma en vivo, sin reiniciar."""
+        _arm_hotkey()
+        print(f"[hotkey] atajo ahora: {config.hotkey_display}")
+        ic = _icon_ref["icon"]
+        if ic:
+            ic.update_menu()
+
+    def _status():
+        if not _ready.is_set():
+            return ("Cargando modelo", "wait")
+        return (f"Listo · {transcriber.device}", "ok")
+
     def do_settings(icon, item):
-        overlay.root.after(0, lambda: open_settings(overlay.root, config))
+        overlay.root.after(0, lambda: open_settings(overlay.root, config,
+                                                    on_hotkey=_hotkey_changed, status=_status))
 
     def do_quit(icon, item):
         icon.stop()
         overlay.stop()
 
     menu = pystray.Menu(
-        pystray.MenuItem("Dictalo", None, enabled=False),
+        pystray.MenuItem(APP_NAME, None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(f"Atajo: {config.hotkey_display}", None, enabled=False),
-        pystray.MenuItem("Ajustes…", do_settings, default=True),  # doble-clic abre esto
+        pystray.MenuItem(lambda item: f"Atajo: {config.hotkey_display}", None, enabled=False),
+        pystray.MenuItem("Ajustes", do_settings, default=True),  # doble-clic abre esto
         pystray.MenuItem("Salir", do_quit),
     )
-    icon = pystray.Icon("dictalo", _icon(), "Dictalo", menu)
+    icon = pystray.Icon("dictado", _tray[False], APP_NAME, menu)
     _icon_ref["icon"] = icon
     icon.run_detached()
     print("Tray arriba — cargando modelo en 2do plano...")

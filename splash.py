@@ -1,31 +1,25 @@
-"""Splash de carga — tarjeta centrada con animación mientras carga el modelo.
-Mismo estilo que el overlay. Se cierra solo cuando la app está lista."""
+"""Splash de carga: tarjeta centrada con el ícono y una onda animada mientras carga
+el modelo. Mismo estilo que el overlay. Se cierra sola cuando la app está lista."""
 import ctypes
 import math
 import tkinter as tk
 
+from PIL import ImageTk
+
+import ui
+from brand import APP_NAME, make_icon
+
 _CHROMA = "#010203"
-_BG = "#0e0f16"
-_CYAN = (34, 211, 238)
-_VIOLET = (167, 139, 250)
 _NB = 7
-
-
-def _hexlerp(t):
-    r = int(_CYAN[0] + (_VIOLET[0] - _CYAN[0]) * t)
-    g = int(_CYAN[1] + (_VIOLET[1] - _CYAN[1]) * t)
-    b = int(_CYAN[2] + (_VIOLET[2] - _CYAN[2]) * t)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-_COLORS = [_hexlerp(i / (_NB - 1)) for i in range(_NB)]
+_COLORS = [ui.mix(ui.CYAN, ui.VIOLET, i / (_NB - 1)) for i in range(_NB)]
 
 
 class Splash:
+    W, H = 320, 184
+
     def __init__(self, root, is_ready):
         self.root = root
         self.is_ready = is_ready
-        self.W, self.H = 300, 150
         self.win = tk.Toplevel(root)
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
@@ -36,8 +30,18 @@ class Splash:
             pass
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         self.win.geometry(f"{self.W}x{self.H}+{(sw - self.W) // 2}+{(sh - self.H) // 2}")
-        self.c = tk.Canvas(self.win, width=self.W, height=self.H, bg=_CHROMA, highlightthickness=0)
-        self.c.pack()
+        c = self.c = tk.Canvas(self.win, width=self.W, height=self.H, bg=_CHROMA,
+                               highlightthickness=0)
+        c.pack()
+        self._card = ui.shape(self.W - 8, self.H - 8, 22, fill="#0f1117", border=ui.BORDER_HI)
+        self._logo = ImageTk.PhotoImage(make_icon(46))
+        c.create_image(4, 4, image=self._card, anchor="nw")
+        c.create_image(self.W // 2, 52, image=self._logo)
+        c.create_text(self.W // 2, 101, text=APP_NAME, fill=ui.TEXT, font=ui.F.h1)
+        c.create_text(self.W // 2, 124, text="Cargando el modelo de voz…", fill=ui.TEXT_2,
+                      font=ui.F.small)
+        self._bars = [c.create_line(0, 0, 0, 0, width=5, fill=col, capstyle="round")
+                      for col in _COLORS]
         self._frame = 0
         self.win.after(20, self._noactivate)
         self.win.after(33, self._tick)
@@ -59,28 +63,10 @@ class Splash:
                 pass
             return
         self._frame += 1
-        self._draw()
-        self.root.after(33, self._tick)
-
-    def _draw(self):
-        c = self.c
-        c.delete("all")
-        self._round_rect(4, 4, self.W - 4, self.H - 4, 22, fill=_BG)
-        c.create_text(self.W // 2, 46, text="Dictalo", fill="#ffffff",
-                      font=("Segoe UI Semibold", 18))
-        c.create_text(self.W // 2, 72, text="Cargando modelo…", fill="#8b90a2",
-                      font=("Segoe UI", 10))
-        # barras con onda de carga (cian→violeta)
-        cy = 110
-        x0 = self.W // 2 - (_NB * 14) // 2 + 4
-        for i in range(_NB):
+        cy, x0 = 156, self.W // 2 - (_NB - 1) * 7
+        for i, bar in enumerate(self._bars):
             a = (math.sin(self._frame * 0.22 - i * 0.6) + 1) / 2
-            h = 6 + a * 22
+            h = 5 + a * 16
             x = x0 + i * 14
-            c.create_line(x, cy - h / 2, x, cy + h / 2, width=6,
-                          fill=_COLORS[i], capstyle="round")
-
-    def _round_rect(self, x1, y1, x2, y2, r, **kw):
-        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-               x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-        return self.c.create_polygon(pts, smooth=True, **kw)
+            self.c.coords(bar, x, cy - h / 2, x, cy + h / 2)
+        self.root.after(33, self._tick)

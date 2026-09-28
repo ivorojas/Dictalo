@@ -19,6 +19,8 @@ _HALLU_END = re.compile(
     [\s.,!¡]*                         # separadores/puntuación previa
     (?:
         closed\ captions?\ by\ red\ bee\ media
+      | closed\ caption(?:s|ing|ed)?(?:\ (?:provided\ )?by\ [^.!?,]{1,40})?
+      | (?:www\.)?\s*[\w-]*\s*caption(?:s|ing)?\s*\.\s*(?:com|org|net)   # www.closedcaptioning.com
       | subtitl(?:es|ing)\ by\ red\ bee\ media
       | subtitles\ by\ the\ amara\.org\ community
       | subt[ií]tulos(?:\ realizados)?\ por\ la\ comunidad\ de\ amara\.org

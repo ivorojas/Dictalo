@@ -66,6 +66,38 @@ def _register_cuda_dlls():
 _register_cuda_dlls()
 
 
+def _model_path(name):
+    """Ruta local del modelo (lo baja solo la 1ra vez). En Windows sin modo desarrollador
+    la caché de Hugging Face a veces falla al crear un enlace (WinError 1314) y al
+    reintentar anda: sin esto, en una PC recién instalada caía a CPU aunque hubiera GPU."""
+    from faster_whisper.utils import download_model
+    for attempt in range(3):
+        try:
+            return download_model(name)
+        except OSError as e:
+            if attempt == 2:
+                raise
+            print(f"  descarga del modelo falló ({e}); reintento")
+            time.sleep(1)
+
+
+class _EsEnOnly:
+    """Envuelve el modelo de ctranslate2 para que la detección de idioma que Whisper hace
+    con la MISMA pasada del codificador (multilingual=True) elija solo entre español e
+    inglés. Así en CPU hay una sola pasada (~7 s) en vez de dos, sin cambiar la regla."""
+    _KEEP = ("<|es|>", "<|en|>")
+
+    def __init__(self, model):
+        self._m = model
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+    def detect_language(self, encoder_output):
+        return [[r for r in res if r[0] in self._KEEP] or res
+                for res in self._m.detect_language(encoder_output)]
+
+
 def _finalize(text: str) -> str:
     """Normaliza espacios (junta saltos/tabs/espacios dobles en uno solo — los
     segmentos de Whisper traen espacio propio y al unirlos quedan dobles), cierra
@@ -89,18 +121,19 @@ class Transcriber:
         from faster_whisper import WhisperModel
         dev, comp = self.config.whisper_device, self.config.whisper_compute
         print(f"  STT: {self.config.whisper_model} | {dev.upper()} {comp}")
+        path = _model_path(self.config.whisper_model)
         try:
             if dev != "cuda":
                 raise RuntimeError(f"device={dev}")
-            self._model = WhisperModel(self.config.whisper_model, device=dev, compute_type=comp)
+            self._model = WhisperModel(path, device=dev, compute_type=comp)
             self.device = "GPU"
         except Exception as e:
-            # Sin NVIDIA (AMD, Intel, notebooks): CPU int8 con un hilo por núcleo físico
-            # (faster-whisper usa 4 por defecto; con SMT hay 2 lógicos por físico).
-            threads = max(4, (os.cpu_count() or 4) // 2)
+            # Sin NVIDIA (AMD, Intel, notebooks): CPU int8 con todos los hilos (faster-whisper
+            # usa 4 por defecto; medido en un Ryzen de 6 núcleos: 12 hilos > 6 > 4).
+            threads = max(4, os.cpu_count() or 4)
             print(f"  GPU no disponible ({e}); uso CPU con {threads} hilos.")
-            self._model = WhisperModel(self.config.whisper_model, device="cpu", compute_type="int8",
-                                       cpu_threads=threads)
+            self._model = WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=threads)
+            self._model.model = _EsEnOnly(self._model.model)
             self.device = "CPU"
         # warmup
         silence = np.zeros(self.config.sample_rate, dtype=np.float32)
@@ -108,31 +141,35 @@ class Transcriber:
 
     def transcribe(self, audio: np.ndarray) -> str:
         sr = self.config.sample_rate
+        t0 = time.perf_counter()
         lang = self.config.whisper_language or None
-        if lang is None:
+        # En CPU el idioma sale de la misma pasada que transcribe (ver _EsEnOnly); en GPU,
+        # una detección aparte (es rápida ahí y queda como siempre anduvo).
+        single_pass = lang is None and self.device == "CPU"
+        if lang is None and not single_pass:
             lang = self._detect_es_en(audio)   # restringe la detección a en/es
         # Colchón de silencio al final: si cortás el dictado justo al terminar de
         # hablar, el audio queda sin cierre y Whisper "completa"/alucina el final.
         # Este silencio le da un cierre limpio (y el speech_pad del VAD tiene de
         # dónde agarrarse). Es silencio → decodifica en milisegundos.
         audio = np.concatenate([audio, np.zeros(int(_TAIL_PAD_S * sr), dtype=np.float32)])
-        t0 = time.perf_counter()
-        text = self._decode(audio, lang, vad_threshold=0.5)
+        text = self._decode(audio, lang, 0.5, single_pass)
         if not text:
             # El VAD descartó TODO el audio. Si había voz baja/entrecortada, un VAD
             # más sensible la recupera; si era silencio de verdad, sigue vacío.
             print("[stt] el VAD no encontró voz — reintento con VAD sensible")
-            text = self._decode(audio, lang, vad_threshold=0.25)
+            text = self._decode(audio, lang, 0.25, single_pass)
         clean = _strip_hallucinations(text)
         if clean != text:
             print(f"[stt] alucinación de subtítulos filtrada del final")
         print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
         return _finalize(clean)
 
-    def _decode(self, audio, lang, vad_threshold):
+    def _decode(self, audio, lang, vad_threshold, single_pass=False):
         segments, _ = self._model.transcribe(
             audio,
-            language=lang,
+            language="es" if single_pass else lang,   # con single_pass el idioma lo pisa cada segmento
+            multilingual=single_pass,
             beam_size=5,                        # precisión (mejor en palabras/nombres ambiguos)
             condition_on_previous_text=False,   # evita arrastrar contexto/repeticiones
             hotwords=(self.config.vocabulary or None),   # sesga hacia TUS términos/nombres

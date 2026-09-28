@@ -127,8 +127,15 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   `condition_on_previous_text=False`. RTX 3070 del dueño → ~0.45 s por dictado corto (36% es detectar idioma).
   Medido: int8_float16/float16 no mejoran nada; nuestros cambios no afectan la precisión. Pesa la distancia al mic.
 - **Una sola versión para todas las PCs**: con NVIDIA usa CUDA (escritorio del dueño: RTX 3070, nada
-  cambia ahí); sin NVIDIA (notebook Ryzen 5 7430U + Radeon integrada) cae a CPU int8 con un hilo por núcleo
-  físico, MISMO modelo y misma precisión (el dueño prefiere esperar más antes que perder calidad).
+  cambia ahí); sin NVIDIA (notebook Ryzen 5 7430U + Radeon integrada) cae a CPU int8 con todos los hilos,
+  MISMO modelo y misma precisión (el dueño prefiere esperar más antes que perder calidad). Habla español e
+  inglés MEZCLADOS en el mismo dictado.
+- **CPU = una sola pasada del codificador** (~7 s c/u en un Ryzen de 6 núcleos; la GPU no lo nota): en CPU el
+  idioma se detecta dentro de la misma pasada (`multilingual=True` + `_EsEnOnly`, que filtra la detección
+  interna a es/en). Medido: mismo texto exacto en es, en y mezclado, ~1.9× más rápido. En GPU sigue la
+  detección aparte de siempre (el dueño pidió no tocar el escritorio).
+- **Primera descarga del modelo**: `_model_path` reintenta (WinError 1314 de symlinks de Hugging Face en
+  Windows sin modo desarrollador). Antes, en una PC nueva, ese error hacía caer a CPU aunque hubiera GPU.
 - **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.
 
 ## Estado actual (v1.2.0)

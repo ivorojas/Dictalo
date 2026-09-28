@@ -68,6 +68,7 @@ _setup_stdio()
 import pystray
 from pynput import keyboard as kb
 
+import globalkey
 import sounds
 import history
 import looks
@@ -80,7 +81,7 @@ from cleaner import Cleaner
 from injector import Injector, capture_foreground
 from overlay import Overlay
 from splash import Splash
-from settings import open_settings
+from settings import open_settings, toggle_settings
 
 
 def _selftest_ui():
@@ -315,11 +316,29 @@ def main():
             return ("Cargando modelo", "wait")
         return (f"Listo · {transcriber.device}", "ok")
 
+    def _set_open_hotkey(key):
+        ok = open_key.set(key)
+        print(f"[atajo] abrir Ajustes: {globalkey.label(key)} "
+              f"({'activo' if ok else 'ya lo usa otra app' if ok is False else 'desactivado'})")
+        if _icon_ref["icon"]:
+            _icon_ref["icon"].update_menu()
+        return ok
+
+    settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey)
+
     def do_settings(icon, item):
-        overlay.root.after(0, lambda: open_settings(overlay.root, config,
-                                                    on_hotkey=_hotkey_changed, status=_status))
+        overlay.root.after(0, lambda: open_settings(overlay.root, config, **settings_kw))
+
+    def _open_key_pressed():
+        back = capture_foreground()
+        overlay.root.after(0, lambda: toggle_settings(overlay.root, config, back_to=back,
+                                                      **settings_kw))
+
+    open_key = globalkey.GlobalHotkey(_open_key_pressed)
+    _set_open_hotkey(config.open_hotkey)
 
     def do_quit(icon, item):
+        open_key.stop()
         icon.stop()
         overlay.stop()
 
@@ -327,7 +346,9 @@ def main():
         pystray.MenuItem(APP_NAME, None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: f"Atajo: {config.hotkey_display}", None, enabled=False),
-        pystray.MenuItem("Ajustes", do_settings, default=True),  # doble-clic abre esto
+        pystray.MenuItem(lambda item: "Ajustes" if config.open_hotkey == "none"
+                         else f"Ajustes ({globalkey.label(config.open_hotkey)})",
+                         do_settings, default=True),  # doble-clic abre esto
         pystray.MenuItem("Salir", do_quit),
     )
     icon = pystray.Icon("dictado", _tray[False], APP_NAME, menu)

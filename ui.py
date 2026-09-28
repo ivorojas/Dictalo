@@ -1104,6 +1104,19 @@ def hwnd_of(win):
     return _u32.GetAncestor(win.winfo_id(), 2) or win.winfo_id()
 
 
+def bring_to_front(win):
+    """Al frente y con foco aunque la app esté en 2do plano (p. ej. desde el atajo global)."""
+    win.deiconify()
+    win.lift()
+    hwnd = hwnd_of(win)
+    if _u32.GetForegroundWindow() != hwnd:
+        _u32.SetForegroundWindow(hwnd)
+    if _u32.GetForegroundWindow() != hwnd:
+        from injector import _focus_window
+        _focus_window(hwnd)
+    win.focus_force()
+
+
 def _colorref(c):
     r, g, b = _rgb(c)
     return r | (g << 8) | (b << 16)

@@ -47,6 +47,9 @@ splash.py      tarjeta de carga centrada mientras carga el modelo (se cierra sol
 ui.py          kit de interfaz: tema, fuentes Segoe UI Variable + íconos Segoe Fluent, formas suavizadas
                (PIL 4x → PhotoImage), Card/Button/Chip/Tag/TagCloud/Field/Select/ScrollArea, barra de título DWM.
 settings.py    ventanas de Ajustes, Historial y Apariencia (galería de estilos + Personalizar + Mis estilos).
+globalkey.py   atajo global para abrir Ajustes (Ctrl+F1 por defecto, config.open_hotkey). RegisterHotKey en
+               su propio hilo (no hook): consume la combinación y devuelve False si otra app ya la tiene.
+               En Ajustes, Enter copia el último dictado, cierra y devuelve el foco a donde estabas; Esc cierra.
 history.py     dictados con fecha en ~/.dictado/history.json; se borran solos a los 3 días (RETENTION_DAYS).
 sounds.py      sonidos sintetizados (numpy+sounddevice) en packs: Suave, Burbuja, Digital, Campana, Silencio.
 dictado.spec   build PyInstaller (windowed, bundlea faster-whisper + DLLs nvidia, ficha de versión del .exe).

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from PIL import ImageTk
 
+import globalkey
 import history
 import looks
 import sounds
@@ -55,6 +56,7 @@ DOT_COLORS = ["#ff5470", "#ef4444", "#f97316", "#facc15", "#34d399", "#22d3ee", 
               "#ffffff"]
 
 _win = None
+_back_to = 0
 _hist_win = None
 _look_win = None
 
@@ -118,11 +120,12 @@ def plural(n, one, many):
 class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
-    def __init__(self, config, on_hotkey=None, status=None):
+    def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None):
         from injector import _clipboard_set
         self.config = config
         self.save = config.save
         self.on_hotkey = on_hotkey or (lambda: None)
+        self.on_open_hotkey = on_open_hotkey or (lambda key: None)
         self.status = status or (lambda: ("Listo", "ok"))
         self.history = history.get
         self.history_version = lambda: history.version
@@ -152,13 +155,14 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", sound_pack="suave",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", sound_pack="suave",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
         vocabulary="Claude, GitHub, Python, React, TypeScript, Docker, Kubernetes, Figma, Notion, "
                    "Slack, Vercel, Supabase, Stripe, Tailwind, PostgreSQL, Whisper, PowerShell, "
                    "VS Code, Linear, Jira")
     return SimpleNamespace(
-        config=cfg, save=lambda: None, on_hotkey=lambda: None, set_sound=lambda pack: None,
+        config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
+        set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
         copy=lambda text: None,
@@ -176,8 +180,8 @@ class _Toast:
         self.saved = ui.label(parent, idle, F.tiny, ui.TEXT_3, bg=ui.BG)
         return self.saved
 
-    def _toast(self, text):
-        self.saved.configure(text=f"✓ {text}", fg=ui.SUCCESS)
+    def _toast(self, text, ok=True):
+        self.saved.configure(text=f"✓ {text}" if ok else text, fg=ui.SUCCESS if ok else ui.WARN)
         if self._toast_job:
             self.win.after_cancel(self._toast_job)
 
@@ -185,7 +189,7 @@ class _Toast:
             self._toast_job = None
             if self.saved.winfo_exists():
                 self.saved.configure(text=self._idle, fg=ui.TEXT_3)
-        self._toast_job = self.win.after(1800, back)
+        self._toast_job = self.win.after(1800 if ok else 4500, back)
 
 
 # ── Ajustes ──────────────────────────────────────────────────────────────────
@@ -252,6 +256,14 @@ class SettingsView(_Toast):
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
         ui.ChipGroup(b, HOTKEYS, self.ctx.config.hotkey, self._set_hotkey, height=34).pack(fill="x")
         ui.separator(b).pack(fill="x", pady=18)
+        ui.label(b, "Atajo para abrir esta ventana", F.body_sb).pack(anchor="w")
+        ui.label(b, "Desde cualquier app. Enter copia el último dictado y cierra; Esc cierra.",
+                 F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
+        self.open_keys = ui.ChipGroup(b, globalkey.OPTIONS,
+                                      getattr(self.ctx.config, "open_hotkey", "ctrl+f1"),
+                                      self._set_open_hotkey, height=34)
+        self.open_keys.pack(fill="x")
+        ui.separator(b).pack(fill="x", pady=18)
         ui.label(b, "Sonidos", F.body_sb).pack(anchor="w")
         ui.label(b, "Al empezar, al terminar y si algo falla. Al elegir uno suena de muestra.",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
@@ -269,6 +281,17 @@ class SettingsView(_Toast):
         self._saved()
         self.ctx.on_hotkey()
         self._refresh_header()
+
+    def _set_open_hotkey(self, key):
+        old = self.ctx.config.open_hotkey
+        self.ctx.config.open_hotkey = key
+        if self.ctx.on_open_hotkey(key) is False:
+            self.ctx.config.open_hotkey = old
+            self.ctx.on_open_hotkey(old)
+            self.open_keys.set(old)
+            self._toast(f"{globalkey.label(key)} ya lo usa otra app, elegí otro", ok=False)
+            return
+        self._saved()
 
     def _set_sound(self, pack):
         self.ctx.config.sound_pack = pack
@@ -460,6 +483,15 @@ class SettingsView(_Toast):
         self.ctx.copy(text)
         btn.flash()
         self._toast("Copiado al portapapeles")
+
+    def copy_latest_and_close(self):
+        """Enter: copia el último dictado y cierra (salvo que estés escribiendo en un campo)."""
+        if isinstance(self.win.focus_get(), tk.Entry):
+            return
+        items = self.ctx.history()
+        if items:
+            self.ctx.copy(items[0]["text"])
+        close_settings()
 
     def _open_history(self):
         open_history(self.win, self.ctx)
@@ -827,13 +859,15 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
         win.bind("<Destroy>", lambda e: on_close() if e.widget is win else None, add="+")
 
 
-def open_settings(root, config, on_hotkey=None, status=None):
-    global _win
+def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0):
+    """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
+    Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
+    global _win, _back_to
     if _win is not None and _win.winfo_exists():
-        _win.deiconify()
-        _win.lift()
-        _win.focus_force()
+        _back_to = back_to or _back_to
+        ui.bring_to_front(_win)
         return
+    _back_to = back_to
     ui.init(root)
     win = tk.Toplevel(root)
     _win = win
@@ -842,11 +876,35 @@ def open_settings(root, config, on_hotkey=None, status=None):
     win.configure(bg=ui.BG)
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
-    view = SettingsView(win, Context(config, on_hotkey, status))
+    view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))
-    win.bind("<Escape>", lambda e: win.destroy())
+    ui.bring_to_front(win)
+    win.bind("<Escape>", lambda e: close_settings())
+    win.bind("<Return>", lambda e: view.copy_latest_and_close())
+
+
+def settings_focused():
+    return _win is not None and _win.winfo_exists() and ui.foreground() == ui.hwnd_of(_win)
+
+
+def close_settings():
+    global _win
+    if _win is not None and _win.winfo_exists():
+        _win.destroy()
+    _win = None
+    if _back_to:
+        from injector import _focus_window
+        _focus_window(_back_to)
+
+
+def toggle_settings(root, config, back_to=0, **kw):
+    """Lo que hace el atajo global: abre Ajustes al frente o, si ya está al frente, la cierra."""
+    if settings_focused():
+        close_settings()
+    else:
+        open_settings(root, config, back_to=back_to, **kw)
 
 
 def selftest(root):

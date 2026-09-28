@@ -56,6 +56,7 @@ class Config:
     # Hotkey (pynput GlobalHotKeys, modo toggle)
     hotkey: str = "<f9>"
     hotkey_display: str = "F9"
+    open_hotkey: str = "ctrl+f1"   # abre Ajustes con el historial arriba (ver globalkey.OPTIONS)
 
     # Ventanita flotante: estilo elegido (id de preset, "custom" o "mine:<nombre>"),
     # el personalizado en edición y los guardados por el usuario (ver looks.py)

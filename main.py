@@ -117,6 +117,12 @@ _DEAD_PEAK = 1e-5   # ≈ -100 dBFS: por debajo, el mic entregó silencio digita
 def main():
     if _SELFTEST:
         return _selftest_ui()
+    if getattr(sys, "frozen", False) and updater.installing():
+        print("[update] hay una actualización instalándose: no arranco encima")
+        ctypes.windll.user32.MessageBoxW(
+            None, f"{APP_NAME} se está actualizando.\nSe vuelve a abrir sola en un minuto.",
+            APP_NAME, 0x40 | 0x10000 | 0x40000)   # ICONINFORMATION | SETFOREGROUND | TOPMOST
+        return
     if _already_running():
         winsound.Beep(300, 200)
         return
@@ -342,8 +348,11 @@ def main():
 
     upd = None
     if getattr(sys, "frozen", False) and config.auto_update:
-        upd = _start_updater(_notify, _idle, _close_for_update,
-                             lambda: _icon_ref["icon"] and _icon_ref["icon"].update_menu())
+        try:   # el actualizador nunca puede impedir que la app arranque
+            upd = _start_updater(_notify, _idle, _close_for_update,
+                                 lambda: _icon_ref["icon"] and _icon_ref["icon"].update_menu())
+        except Exception as e:
+            print(f"[update] no pude iniciar el actualizador: {e}")
 
     def _set_model(name):
         """Ajustes cambió el modelo (solo se ofrece sin NVIDIA): se recarga en 2do plano

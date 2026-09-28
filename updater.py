@@ -77,20 +77,49 @@ def run_installer(path, relaunch):
     subprocess.Popen(cmd, creationflags=flags, close_fds=True)
 
 
+def _pending():
+    """Versión cuyo instalador se lanzó (marca escrita justo antes), o None."""
+    try:
+        return (DIR / "pending.txt").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def installing():
+    """True si una actualización se está instalando AHORA: hay marca reciente y su
+    instalador está en uso (Windows no deja abrir para escribir un .exe que corre).
+    Si abrís la app en ese minuto, no tiene que arrancar encima del instalador."""
+    v = _pending()
+    if not v or version_tuple(v) <= version_tuple(__version__):
+        return False
+    try:
+        if time.time() - (DIR / "pending.txt").stat().st_mtime > 600:
+            return False              # un instalador colgado no puede bloquear la app para siempre
+        with open(DIR / f"{v}.exe", "ab"):
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def just_updated():
     """Versión a la que se actualizó en este arranque (para avisar), o None. Limpia los
-    instaladores que ya no sirven."""
-    marker = DIR / "pending.txt"
-    done = None
-    try:
-        if marker.read_text(encoding="utf-8").strip() == __version__:
-            done = __version__
-    except OSError:
-        pass
-    if DIR.is_dir():
-        for p in DIR.iterdir():
-            if done or p.suffix in (".part", ".txt") or version_tuple(p.stem) <= version_tuple(__version__):
+    instaladores que ya no sirven; si alguno sigue en uso, lo deja para la próxima."""
+    v = _pending()
+    done = __version__ if v == __version__ else None
+    if not DIR.is_dir():
+        return done
+    for p in DIR.iterdir():
+        stale = (p.suffix == ".part"
+                 or (p.suffix == ".exe" and version_tuple(p.stem) <= version_tuple(__version__))
+                 or (p.name == "pending.txt" and (done or not v
+                                                  or version_tuple(v) < version_tuple(__version__))))
+        if stale:
+            try:
                 p.unlink(missing_ok=True)
+            except OSError:
+                pass
     return done
 
 

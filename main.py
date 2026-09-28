@@ -49,9 +49,13 @@ def _setup_stdio():
                 pass
 
 
+_mutex = {"h": None}   # se suelta antes de auto-actualizar (el instalador lo espera libre)
+
+
 def _already_running():
     k = ctypes.windll.kernel32
-    k.CreateMutexW(None, False, "Global\\DictadoApp_SingleInstance")
+    k.CreateMutexW.restype = ctypes.c_void_p
+    _mutex["h"] = k.CreateMutexW(None, False, "Global\\DictadoApp_SingleInstance")
     if k.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
         return True
     # La versión anterior ("Dictalo") abierta a la vez pelearía por el mismo atajo.
@@ -69,6 +73,7 @@ import pystray
 from pynput import keyboard as kb
 
 import globalkey
+import updater
 import sounds
 import history
 import looks
@@ -166,7 +171,10 @@ def main():
 
     _gen = {"n": 0}   # id de grabación (para que un chequeo viejo no afecte a una nueva)
 
+    _last_use = {"t": time.time()}
+
     def on_toggle():
+        _last_use["t"] = time.time()
         if not _ready.is_set():
             sounds.wait()
             print("[rec] aún cargando el modelo")
@@ -355,7 +363,35 @@ def main():
     _icon_ref["icon"] = icon
     icon.run_detached()
     print("Tray arriba — cargando modelo en 2do plano...")
+    def _idle():
+        return (_ready.is_set() and not recorder.is_recording and not _busy.is_set()
+                and time.time() - _last_use["t"] > updater.IDLE_S)
+
+    def _close_for_update():
+        open_key.stop()
+        icon.stop()
+
+    if getattr(sys, "frozen", False) and config.auto_update:
+        _start_updater(_notify, _idle, _close_for_update)
     overlay.run()
+
+
+def _start_updater(notify, is_idle, stop):
+    """Solo en el .exe instalado: avisa si recién se actualizó y busca versiones nuevas."""
+    done = updater.just_updated()
+    if done:
+        print(f"[update] actualizada a {done}")
+        threading.Timer(5, lambda: notify(f"Se actualizó a la versión {done}.")).start()
+
+    def install(version, path):
+        notify(f"Actualizando a la versión {version}. Vuelve sola en un minuto.")
+        time.sleep(3)
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_mutex["h"]))
+        updater.run_installer(path, sys.executable)
+        stop()
+        os._exit(0)
+
+    updater.Updater(is_idle, install)
 
 
 if __name__ == "__main__":

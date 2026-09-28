@@ -68,6 +68,9 @@ class Config:
     # Sonidos: pack elegido (ver sounds.PACKS)
     sound_pack: str = "suave"
 
+    # Busca versiones nuevas en GitHub y se instala sola cuando no estás dictando (updater.py)
+    auto_update: bool = True
+
     def __post_init__(self):
         self._load()
 

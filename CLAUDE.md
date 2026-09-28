@@ -51,6 +51,11 @@ globalkey.py   atajo global para abrir Ajustes (Ctrl+F1 por defecto, config.open
                su propio hilo (no hook): consume la combinación y devuelve False si otra app ya la tiene.
                La misma tecla abre y cierra (si está abierta, aunque sea detrás de otra ventana, la cierra).
                En Ajustes, Enter copia el último dictado, cierra y devuelve el foco a donde estabas; Esc cierra.
+updater.py     auto-actualización (solo en el .exe): cada 6 h consulta el último release de GitHub; si es
+               más nuevo baja DictadoApp-Setup.exe a ~/.dictado/update, verifica sha256 (el "digest" de la API)
+               y, con 2 min sin dictar, suelta el mutex, lanza el instalador /VERYSILENT vía cmd (que al
+               terminar vuelve a abrir la app, salga bien o no) y se cierra. Al volver avisa "Se actualizó".
+               => PUBLICAR UN RELEASE = ACTUALIZAR TODAS LAS PCs (escritorio y notebook). No publicar nada roto.
 history.py     dictados con fecha en ~/.dictado/history.json; se borran solos a los 3 días (RETENTION_DAYS).
 sounds.py      sonidos sintetizados (numpy+sounddevice) en packs: Suave, Burbuja, Digital, Campana, Silencio.
 dictado.spec   build PyInstaller (windowed, bundlea faster-whisper + DLLs nvidia, ficha de versión del .exe).
@@ -121,6 +126,9 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
 - **Modelo STT**: large-v3-turbo, CUDA int8, `beam_size=5`, `hotwords=vocabulario`,
   `condition_on_previous_text=False`. RTX 3070 del dueño → ~0.45 s por dictado corto (36% es detectar idioma).
   Medido: int8_float16/float16 no mejoran nada; nuestros cambios no afectan la precisión. Pesa la distancia al mic.
+- **Una sola versión para todas las PCs**: con NVIDIA usa CUDA (escritorio del dueño: RTX 3070, nada
+  cambia ahí); sin NVIDIA (notebook Ryzen 5 7430U + Radeon integrada) cae a CPU int8 con un hilo por núcleo
+  físico, MISMO modelo y misma precisión (el dueño prefiere esperar más antes que perder calidad).
 - **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.
 
 ## Estado actual (v1.2.0)

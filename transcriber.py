@@ -90,11 +90,17 @@ class Transcriber:
         dev, comp = self.config.whisper_device, self.config.whisper_compute
         print(f"  STT: {self.config.whisper_model} | {dev.upper()} {comp}")
         try:
+            if dev != "cuda":
+                raise RuntimeError(f"device={dev}")
             self._model = WhisperModel(self.config.whisper_model, device=dev, compute_type=comp)
-            self.device = "GPU" if dev == "cuda" else "CPU"
+            self.device = "GPU"
         except Exception as e:
-            print(f"  GPU no disponible ({e}); uso CPU.")
-            self._model = WhisperModel(self.config.whisper_model, device="cpu", compute_type="int8")
+            # Sin NVIDIA (AMD, Intel, notebooks): CPU int8 con un hilo por núcleo físico
+            # (faster-whisper usa 4 por defecto; con SMT hay 2 lógicos por físico).
+            threads = max(4, (os.cpu_count() or 4) // 2)
+            print(f"  GPU no disponible ({e}); uso CPU con {threads} hilos.")
+            self._model = WhisperModel(self.config.whisper_model, device="cpu", compute_type="int8",
+                                       cpu_threads=threads)
             self.device = "CPU"
         # warmup
         silence = np.zeros(self.config.sample_rate, dtype=np.float32)

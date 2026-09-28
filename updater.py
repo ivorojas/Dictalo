@@ -21,7 +21,7 @@ from config import APP_DIR
 REPO = "ivorojas/dictado-app"
 ASSET = "DictadoApp-Setup.exe"
 FIRST_CHECK_S = 90
-EVERY_S = 6 * 3600
+EVERY_S = 3600
 IDLE_S = 120          # sin dictar hace 2 min → se puede instalar
 DIR = APP_DIR / "update"
 _UA = {"User-Agent": f"DictadoApp/{__version__}", "Accept": "application/vnd.github+json"}

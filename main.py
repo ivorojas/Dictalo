@@ -342,7 +342,8 @@ def main():
 
     upd = None
     if getattr(sys, "frozen", False) and config.auto_update:
-        upd = _start_updater(_notify, _idle, _close_for_update)
+        upd = _start_updater(_notify, _idle, _close_for_update,
+                             lambda: _icon_ref["icon"] and _icon_ref["icon"].update_menu())
 
     def _set_model(name):
         """Ajustes cambió el modelo (solo se ofrece sin NVIDIA): se recarga en 2do plano
@@ -382,13 +383,47 @@ def main():
         icon.stop()
         overlay.stop()
 
+    def _update_label(item):
+        if upd is None:
+            return ""
+        if upd.state == "ready":
+            return f"Instalar la versión {upd.version}"
+        if upd.state == "checking":
+            return "Buscando actualizaciones…"
+        if upd.state in ("downloading", "installing"):
+            return f"Bajando la versión {upd.version}…"
+        return "Buscar actualizaciones"
+
+    def do_update(icon, item):
+        """Del menú del ícono: instala si ya bajó; si no, busca ya y avisa el resultado."""
+        if upd.state == "ready":
+            upd.install_now()
+            return
+        upd.check_now()
+
+        def report():
+            time.sleep(0.5)
+            for _ in range(120):
+                if upd.state != "checking":
+                    break
+                time.sleep(0.5)
+            icon.update_menu()
+            msg = {"uptodate": f"Ya tenés la última versión ({__version__}).",
+                   "downloading": f"Hay una versión nueva ({upd.version}). La estoy bajando; "
+                                  "te aviso cuando esté lista.",
+                   "error": "No se pudo buscar actualizaciones (¿sin internet?)."}.get(upd.state)
+            if msg:
+                _notify(msg)
+        threading.Thread(target=report, daemon=True).start()
+
     menu = pystray.Menu(
-        pystray.MenuItem(APP_NAME, None, enabled=False),
+        pystray.MenuItem(f"{APP_NAME} {__version__}", None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: f"Atajo: {config.hotkey_display}", None, enabled=False),
         pystray.MenuItem(lambda item: "Ajustes" if config.open_hotkey == "none"
                          else f"Ajustes ({globalkey.label(config.open_hotkey)})",
                          do_settings, default=True),  # doble-clic abre esto
+        pystray.MenuItem(_update_label, do_update, visible=upd is not None),
         pystray.MenuItem("Salir", do_quit),
     )
     icon = pystray.Icon("dictado", _tray[False], APP_NAME, menu)
@@ -398,7 +433,7 @@ def main():
     overlay.run()
 
 
-def _start_updater(notify, is_idle, stop):
+def _start_updater(notify, is_idle, stop, refresh_menu):
     """Solo en el .exe instalado: avisa si recién se actualizó y busca versiones nuevas."""
     done = updater.just_updated()
     if done:
@@ -415,7 +450,8 @@ def _start_updater(notify, is_idle, stop):
 
     def ready(version):
         notify(f"La versión {version} está lista: se instala sola cuando no estés dictando "
-               "(o ya mismo desde Ajustes).")
+               "(o ya mismo desde el menú del ícono).")
+        refresh_menu()
 
     return updater.Updater(is_idle, install, ready)
 

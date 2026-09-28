@@ -544,11 +544,11 @@ class SettingsView(_Toast):
         if u is None:
             return "Se actualiza sola en la app instalada.", ui.TEXT_3, None, None
         v = u.version
+        checked = f" · revisado {when(u.checked)}" if u.checked else ""
         return {
-            "idle": ("Busca versiones nuevas sola cada 6 horas.", ui.TEXT_3, "Buscar ahora", "secondary"),
+            "idle": ("Busca versiones nuevas sola cada hora.", ui.TEXT_3, "Buscar ahora", "secondary"),
             "checking": ("Buscando…", ui.TEXT_3, None, None),
-            "uptodate": (f"Estás en la última versión · revisado {when(u.checked)}", ui.SUCCESS,
-                         "Buscar ahora", "secondary"),
+            "uptodate": (f"Estás en la última versión{checked}", ui.SUCCESS, "Buscar ahora", "secondary"),
             "downloading": (f"Bajando la versión {v}… {round(u.progress * 100)}%", ui.ACCENT, None, None),
             "ready": (f"La versión {v} está lista. Se instala sola cuando no estés dictando.",
                       ui.ACCENT, "Instalar ahora", "primary"),
@@ -1014,10 +1014,12 @@ def selftest(root):
     win = tk.Toplevel(root)
     win.withdraw()
     view = SettingsView(win, ctx)
-    ctx.updates.version = "9.9.9"
-    for state in ("idle", "checking", "uptodate", "downloading", "ready", "installing", "error"):
-        ctx.updates.state, ctx.updates.progress = state, 0.42
-        view._refresh_update()
+    checked = ctx.updates.checked
+    for version, when_checked in ((None, None), ("9.9.9", checked)):   # recién abierta y ya revisada
+        ctx.updates.version, ctx.updates.checked = version, when_checked
+        for state in ("idle", "checking", "uptodate", "downloading", "ready", "installing", "error"):
+            ctx.updates.state, ctx.updates.progress = state, 0.42
+            view._refresh_update()
     ctx.updates.state = "uptodate"
     win.destroy()
     ui.shape(300, 120, 14, fill=ui.SURFACE, border=ui.BORDER)

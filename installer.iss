@@ -1,6 +1,6 @@
 ; Instalador de Dictado App (Inno Setup 6)
 #define AppName "Dictado App"
-#define AppVersion "1.2.9"
+#define AppVersion "1.2.10"
 #define AppExe "DictadoApp.exe"
 
 [Setup]
@@ -14,6 +14,8 @@ AppPublisher=Ivo Rojas
 AppPublisherURL=https://github.com/ivorojas/dictado-app
 DefaultDirName={localappdata}\Programs\{#AppName}
 UsePreviousAppDir=no
+; Instalar encima es lo normal (así se actualiza): sin el aviso de "la carpeta ya existe"
+DirExistsWarning=no
 DefaultGroupName={#AppName}
 ; Sin esto Inno reusa el grupo del menú Inicio de la instalación anterior ("Dictalo")
 UsePreviousGroup=no

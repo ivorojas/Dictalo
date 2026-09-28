@@ -22,6 +22,7 @@ from ui import F
 
 HOTKEYS = [("F9", "<f9>"), ("F8", "<f8>"), ("F10", "<f10>"),
            ("Ctrl+Alt+D", "<ctrl>+<alt>+d"), ("Ctrl+Shift+Espacio", "<ctrl>+<shift>+<space>")]
+MODELS = [("Preciso", "large-v3-turbo"), ("Rápido", "small")]   # solo se ofrece sin NVIDIA
 PREVIEW = 3
 W_SETTINGS, W_HISTORY, W_LOOKS = 560, 600, 576
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -120,10 +121,13 @@ def plural(n, one, many):
 class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
-    def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None):
+    def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None,
+                 on_model=None, stt_device=None):
         from injector import _clipboard_set
         self.config = config
         self.updates = updates          # updater.Updater (None fuera de la app instalada)
+        self.on_model = on_model or (lambda name: None)
+        self.stt_device = stt_device or (lambda: None)   # "GPU" / "CPU" / None (cargando)
         self.save = config.save
         self.on_hotkey = on_hotkey or (lambda: None)
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
@@ -157,6 +161,7 @@ def sample_context():
     ]
     cfg = SimpleNamespace(
         mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", sound_pack="suave",
+        whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
         vocabulary="Claude, GitHub, Python, React, TypeScript, Docker, Kubernetes, Figma, Notion, "
                    "Slack, Vercel, Supabase, Stripe, Tailwind, PostgreSQL, Whisper, PowerShell, "
@@ -164,6 +169,7 @@ def sample_context():
     return SimpleNamespace(
         updates=SimpleNamespace(state="uptodate", version=None, progress=0.0, checked=now - 60 * 12,
                                 check_now=lambda: None, install_now=lambda: None),
+        on_model=lambda name: None, stt_device=lambda: "CPU",
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
@@ -254,6 +260,15 @@ class SettingsView(_Toast):
         self.mic = ui.Select(b, self.ctx.devices(), self.ctx.config.mic_index, self._set_mic,
                              icon=ui.I_MIC)
         self.mic.pack(fill="x")
+        if self.ctx.stt_device() == "CPU":
+            ui.separator(b).pack(fill="x", pady=18)
+            ui.label(b, "Modelo", F.body_sb).pack(anchor="w")
+            ui.label(b, "Esta PC no tiene placa NVIDIA y transcribe con el procesador. Rápido tarda "
+                        "unas 3 veces menos, pero es menos preciso y si mezclás idiomas en un mismo "
+                        "dictado puede perder una parte.", F.small, ui.TEXT_3,
+                     wraplength=440).pack(anchor="w", pady=(3, 12))
+            ui.ChipGroup(b, MODELS, getattr(self.ctx.config, "whisper_model", MODELS[0][1]),
+                         self._set_model, height=34).pack(fill="x")
         ui.separator(b).pack(fill="x", pady=18)
         ui.label(b, "Atajo para dictar", F.body_sb).pack(anchor="w")
         ui.label(b, "Tocalo una vez para empezar y otra para terminar y pegar el texto.",
@@ -284,6 +299,12 @@ class SettingsView(_Toast):
         self.ctx.config.hotkey_display = dict((v, t) for t, v in HOTKEYS)[value]
         self._saved()
         self.ctx.on_hotkey()
+        self._refresh_header()
+
+    def _set_model(self, name):
+        self.ctx.config.whisper_model = name
+        self._saved()
+        self.ctx.on_model(name)
         self._refresh_header()
 
     def _set_open_hotkey(self, key):
@@ -923,7 +944,7 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
 
 
 def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
-                  updates=None):
+                  updates=None, on_model=None, stt_device=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -940,7 +961,8 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.configure(bg=ui.BG)
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
-    view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates))
+    view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates,
+                                     on_model, stt_device))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))

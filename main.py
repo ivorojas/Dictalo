@@ -344,8 +344,27 @@ def main():
     if getattr(sys, "frozen", False) and config.auto_update:
         upd = _start_updater(_notify, _idle, _close_for_update)
 
+    def _set_model(name):
+        """Ajustes cambió el modelo (solo se ofrece sin NVIDIA): se recarga en 2do plano
+        (la 1ra vez lo baja); mientras tanto el estado dice "Cargando modelo"."""
+        config.whisper_model = name
+        _ready.clear()
+
+        def reload():
+            try:
+                transcriber.load()
+            except Exception as e:
+                print(f"[stt] no pude cargar {name}: {e}")
+                sounds.error()
+            else:
+                sounds.ready()
+            finally:
+                _ready.set()
+        threading.Thread(target=reload, daemon=True).start()
+
     settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey,
-                       updates=upd)
+                       updates=upd, on_model=_set_model,
+                       stt_device=lambda: transcriber.device if _ready.is_set() else None)
 
     def do_settings(icon, item):
         overlay.root.after(0, lambda: open_settings(overlay.root, config, **settings_kw))

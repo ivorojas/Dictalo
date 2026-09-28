@@ -64,7 +64,7 @@ Double-click the tray icon. Everything saves on its own, and changes apply insta
 </p>
 
 - **Microphone** and **hotkey** (<kbd>F9</kbd>, <kbd>F8</kbd>, <kbd>F10</kbd>, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>)
-- **Shortcut to open Settings** (<kbd>Ctrl</kbd>+<kbd>F1</kbd>, <kbd>Shift</kbd>+<kbd>F1</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F1</kbd>, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> or none). If another app already uses it, you're told right away
+- **Shortcut to open Settings** (<kbd>Ctrl</kbd>+<kbd>F1</kbd>, <kbd>Alt</kbd>+<kbd>F1</kbd>, <kbd>Shift</kbd>+<kbd>F1</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F1</kbd>, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> or none). If another app already uses it, you're told right away
 - **Vocabulary** as tags: add with <kbd>Enter</kbd> (paste a comma separated list to add many), remove with ✕
 - **History**: your latest dictations at a glance, and **See all** opens a window with search and copy for each one
 
@@ -170,7 +170,7 @@ Dictado App is **Windows only**. It relies on native Windows APIs for text injec
 | Setup | Status |
 |---|---|
 | **Windows + NVIDIA GPU** | ✅ Full speed (CUDA) |
-| **Windows + AMD / Intel / no GPU** | ✅ Works on **CPU** (slower), same model and accuracy, using all CPU cores |
+| **Windows + AMD / Intel / no GPU** | ✅ Works on **CPU** (slower), same model and accuracy, using all CPU cores. Optional **Fast** model in Settings (about 3× faster, less accurate) |
 
 ## Roadmap
 

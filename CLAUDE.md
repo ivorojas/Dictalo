@@ -134,6 +134,14 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   idioma se detecta dentro de la misma pasada (`multilingual=True` + `_EsEnOnly`, que filtra la detección
   interna a es/en). Medido: mismo texto exacto en es, en y mezclado, ~1.9× más rápido. En GPU sigue la
   detección aparte de siempre (el dueño pidió no tocar el escritorio).
+- **Modelo "Rápido" (small) solo sin NVIDIA**: Ajustes → Modelo (la fila aparece solo si transcribe en CPU;
+  en el escritorio no existe). Cambia `config.whisper_model` y recarga en vivo (`main._set_model`). Medido en
+  CPU Ryzen 5600G: turbo ~8 s, small ~2.7 s, medium ~8 s y peor (descartado). small es perfecto en un solo
+  idioma pero en dictados MEZCLADOS perdió la parte en inglés (lo dice la UI).
+- **Radeon integrada: probada y DESCARTADA** (2026-09): ONNX Runtime + DirectML con el codificador turbo fp16
+  en la Vega 7 del 5600G: 5 s la 1ra pasada y después Windows reseteó la GPU (TDR, 887A0006). En la notebook
+  esa GPU maneja la pantalla → parpadeo negro. whisper.cpp+Vulkan no se probó: no hay binarios Windows y
+  compilar pide Windows SDK + Vulkan SDK (instalación con admin).
 - **Primera descarga del modelo**: `_model_path` reintenta (WinError 1314 de symlinks de Hugging Face en
   Windows sin modo desarrollador). Antes, en una PC nueva, ese error hacía caer a CPU aunque hubiera GPU.
 - **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.

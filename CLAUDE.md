@@ -99,6 +99,10 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   foco está en 0 por la app): se devuelve el foco en el acto. **Nunca usar datos reales del dueño** en capturas.
 - **pythonw / stdout**: en el .exe (sin consola) `sys.stdout` es None → cualquier print mata la app.
   `main._setup_stdio()` redirige a `~/.dictado/dictado.log` (append, tope 2MB). **Para diagnosticar: ese log.**
+  Desde v1.2.12 cada línea lleva la hora, `faulthandler` escribe ahí las caídas internas (C: access
+  violation, abort) con el lugar de cada hilo, y al cerrar queda `[salida] ...` (Salir del menú / fin del loop /
+  el proceso terminó). Si la app "desaparece" y no hay NADA de eso, la mataron desde afuera.
+  Ojo al leerlo: tiene los dictados del dueño; filtrar/ocultar líneas `[stt]` y `[ok]`.
 - **Migración Dictalo → Dictado App**: al arrancar, `config.migrate_legacy_data()` renombra `~/.dictalo` a
   `~/.dictado` (si está en uso, copia prefs/history). OJO: importar `main.py` la dispara; en pruebas no
   importarlo con la app vieja abierta. `~/.dictado-app` son restos de la app ANTERIOR a Dictalo (no usar).

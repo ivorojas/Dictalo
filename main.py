@@ -4,7 +4,9 @@ Dictado App: dictado por voz para Windows
 Tap F9 → grabás (overlay flotante) → tap F9 → Whisper transcribe → pega en tu campo.
 Corre en 2do plano (tray). Ajustes desde el ícono.
 """
+import atexit
 import ctypes
+import faulthandler
 import os
 import queue
 import sys
@@ -19,6 +21,32 @@ from config import APP_DIR, migrate_legacy_data
 _SELFTEST = "--selftest-ui" in sys.argv
 if not _SELFTEST:
     migrate_legacy_data()   # antes de abrir el log: la carpeta de datos puede moverse
+
+
+class _Stamped:
+    """Log con la hora al principio de cada línea (para saber cuándo pasó cada cosa)."""
+
+    def __init__(self, f):
+        self.f, self._bol = f, True
+
+    def write(self, s):
+        out = []
+        for part in s.splitlines(keepends=True):
+            if self._bol:
+                out.append(time.strftime("%H:%M:%S "))
+            out.append(part)
+            self._bol = part.endswith("\n")
+        self.f.write("".join(out))
+        return len(s)
+
+    def flush(self):
+        self.f.flush()
+
+    def fileno(self):
+        return self.f.fileno()
+
+    def __getattr__(self, name):          # isatty, encoding, etc. (algunas librerías los piden)
+        return getattr(self.f, name)
 
 
 def _setup_stdio():
@@ -40,7 +68,11 @@ def _setup_stdio():
         except OSError:
             pass
         f = open(p, "a", encoding="utf-8", buffering=1)
-        sys.stdout = sys.stderr = f
+        sys.stdout = sys.stderr = _Stamped(f)
+        # Una caída interna (de C, no de Python) mata el proceso sin Traceback y sin consola
+        # donde verlo: faulthandler escribe en el log en qué parte del código estaba cada hilo.
+        faulthandler.enable(file=f, all_threads=True)
+        atexit.register(lambda: print("[salida] el proceso terminó"))
     else:
         for s in (sys.stdout, sys.stderr):
             try:
@@ -388,6 +420,7 @@ def main():
     _set_open_hotkey(config.open_hotkey)
 
     def do_quit(icon, item):
+        print("[salida] Salir desde el menú del ícono")
         open_key.stop()
         icon.stop()
         overlay.stop()
@@ -440,6 +473,7 @@ def main():
     icon.run_detached()
     print("Tray arriba — cargando modelo en 2do plano...")
     overlay.run()
+    print("[salida] terminó el loop principal de la interfaz")
 
 
 def _start_updater(notify, is_idle, stop, refresh_menu):

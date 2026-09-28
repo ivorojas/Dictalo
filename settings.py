@@ -120,9 +120,10 @@ def plural(n, one, many):
 class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
-    def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None):
+    def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None):
         from injector import _clipboard_set
         self.config = config
+        self.updates = updates          # updater.Updater (None fuera de la app instalada)
         self.save = config.save
         self.on_hotkey = on_hotkey or (lambda: None)
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
@@ -161,6 +162,8 @@ def sample_context():
                    "Slack, Vercel, Supabase, Stripe, Tailwind, PostgreSQL, Whisper, PowerShell, "
                    "VS Code, Linear, Jira")
     return SimpleNamespace(
+        updates=SimpleNamespace(state="uptodate", version=None, progress=0.0, checked=now - 60 * 12,
+                                check_now=lambda: None, install_now=lambda: None),
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
@@ -207,6 +210,7 @@ class SettingsView(_Toast):
         self._dictado(root)
         self._ventanita(root)
         self._vocabulario(root)
+        self._actualizaciones(root)
         self._footer(root)
         self._poll()
 
@@ -496,6 +500,64 @@ class SettingsView(_Toast):
     def _open_history(self):
         open_history(self.win, self.ctx)
 
+    # actualizaciones
+    def _actualizaciones(self, p):
+        self._section(p, "Actualizaciones")
+        card = ui.Card(p)
+        card.pack(fill="x")
+        row = tk.Frame(card.body, bg=ui.SURFACE)
+        row.pack(fill="x")
+        self.upd_btn = ui.Button(row, "Buscar ahora", command=self._update_action, height=34,
+                                 padx=14, font=F.small_sb)
+        col = tk.Frame(row, bg=ui.SURFACE)
+        col.pack(side="left", fill="x", expand=True)
+        ui.label(col, f"Versión {__version__}", F.body_sb).pack(anchor="w")
+        self.upd_text = ui.label(col, "", F.small, ui.TEXT_3, wraplength=320)
+        self.upd_text.pack(anchor="w", pady=(3, 0))
+        self._upd_seen = None
+        self._refresh_update()
+
+    def _update_view(self):
+        """(texto, color, botón, tipo de botón) según el estado del actualizador."""
+        u = self.ctx.updates
+        if u is None:
+            return "Se actualiza sola en la app instalada.", ui.TEXT_3, None, None
+        v = u.version
+        return {
+            "idle": ("Busca versiones nuevas sola cada 6 horas.", ui.TEXT_3, "Buscar ahora", "secondary"),
+            "checking": ("Buscando…", ui.TEXT_3, None, None),
+            "uptodate": (f"Estás en la última versión · revisado {when(u.checked)}", ui.SUCCESS,
+                         "Buscar ahora", "secondary"),
+            "downloading": (f"Bajando la versión {v}… {round(u.progress * 100)}%", ui.ACCENT, None, None),
+            "ready": (f"La versión {v} está lista. Se instala sola cuando no estés dictando.",
+                      ui.ACCENT, "Instalar ahora", "primary"),
+            "installing": (f"Instalando {v}: se cierra y vuelve sola en un minuto.", ui.ACCENT, None, None),
+            "error": ("No se pudo buscar (¿sin internet?).", ui.WARN, "Probar de nuevo", "secondary"),
+        }[u.state]
+
+    def _refresh_update(self):
+        u = self.ctx.updates
+        key = u and (u.state, u.version, round(u.progress * 100), u.checked and when(u.checked))
+        if key == self._upd_seen and u is not None:
+            return
+        self._upd_seen = key
+        text, color, btn, kind = self._update_view()
+        self.upd_text.configure(text=text, fg=color)
+        if btn:
+            self.upd_btn.update_content(text=btn, kind=kind)
+            self.upd_btn.pack(side="right", padx=(12, 0))
+        else:
+            self.upd_btn.pack_forget()
+
+    def _update_action(self):
+        u = self.ctx.updates
+        if u.state == "ready":
+            u.install_now()
+        else:
+            u.check_now()
+            u.state = "checking"
+        self._refresh_update()
+
     # pie
     def _footer(self, p):
         foot = tk.Frame(p, bg=ui.BG)
@@ -515,7 +577,8 @@ class SettingsView(_Toast):
             self._render_history()
         if self.ctx.status() != self._status:
             self._refresh_header()
-        self.win.after(1500, self._poll)
+        self._refresh_update()
+        self.win.after(1000, self._poll)
 
 
 # ── Historial completo ───────────────────────────────────────────────────────
@@ -859,7 +922,8 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
         win.bind("<Destroy>", lambda e: on_close() if e.widget is win else None, add="+")
 
 
-def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0):
+def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
+                  updates=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -876,7 +940,7 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.configure(bg=ui.BG)
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
-    view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey))
+    view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))
@@ -925,6 +989,15 @@ def selftest(root):
         build(win)
         win.update_idletasks()
         win.destroy()
+    win = tk.Toplevel(root)
+    win.withdraw()
+    view = SettingsView(win, ctx)
+    ctx.updates.version = "9.9.9"
+    for state in ("idle", "checking", "uptodate", "downloading", "ready", "installing", "error"):
+        ctx.updates.state, ctx.updates.progress = state, 0.42
+        view._refresh_update()
+    ctx.updates.state = "uptodate"
+    win.destroy()
     ui.shape(300, 120, 14, fill=ui.SURFACE, border=ui.BORDER)
     ui.shape(120, 34, 17, grad=(ui.CYAN, ui.VIOLET))
     for pid in looks.PRESET_IDS:

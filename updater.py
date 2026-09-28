@@ -45,15 +45,20 @@ def latest():
     return None
 
 
-def download(info, dest):
-    """Baja el instalador a `dest` y lo verifica (tamaño y sha256). True si quedó bien."""
+def download(info, dest, progress=None):
+    """Baja el instalador a `dest` y lo verifica (tamaño y sha256). True si quedó bien.
+    `progress(fracción)` se llama a medida que baja."""
     tmp = dest.with_suffix(".part")
     h = hashlib.sha256()
+    got = 0
     req = urllib.request.Request(info["url"], headers={"User-Agent": _UA["User-Agent"]})
     with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
         while chunk := r.read(1 << 20):
             h.update(chunk)
             f.write(chunk)
+            got += len(chunk)
+            if progress:
+                progress(got / info["size"])
     ok = tmp.stat().st_size == info["size"] and (info["sha256"] is None
                                                  or h.hexdigest() == info["sha256"])
     if ok:
@@ -90,35 +95,64 @@ def just_updated():
 
 
 class Updater:
-    def __init__(self, is_idle, on_install):
+    """Busca, baja e instala. Su estado lo muestra Ajustes:
+    state: "idle" (todavía no buscó) | "checking" | "uptodate" | "downloading" | "ready"
+           | "installing" | "error";  version: la nueva;  progress: 0-1;  checked: cuándo buscó."""
+
+    def __init__(self, is_idle, on_install, on_ready=None):
         """`is_idle()`: True si se puede cerrar la app sin cortar nada.
-        `on_install(version, path)`: cierra la app y lanza el instalador."""
-        self.is_idle, self.on_install = is_idle, on_install
+        `on_install(version, path)`: cierra la app y lanza el instalador.
+        `on_ready(version)`: la versión nueva ya bajó (para avisar)."""
+        self.is_idle, self.on_install, self.on_ready = is_idle, on_install, on_ready
+        self.state, self.version, self.progress, self.checked = "idle", None, 0.0, None
+        self._wake = threading.Event()      # "Buscar ahora"
+        self._now = threading.Event()       # "Instalar ahora"
         threading.Thread(target=self._loop, daemon=True).start()
 
+    def check_now(self):
+        if self.state not in ("checking", "downloading", "ready", "installing"):
+            self._wake.set()
+
+    def install_now(self):
+        if self.state == "ready":
+            self._now.set()
+
     def _loop(self):
-        time.sleep(FIRST_CHECK_S)
+        self._wake.wait(FIRST_CHECK_S)
         while True:
+            self._wake.clear()
             try:
                 self._check()
             except Exception as e:
+                self.state = "error"
                 print(f"[update] no pude buscar actualizaciones: {e}")
-            time.sleep(EVERY_S)
+            self._wake.wait(EVERY_S)
 
     def _check(self):
+        self.state = "checking"
         info = latest()
+        self.checked = time.time()
         if not info or version_tuple(info["version"]) <= version_tuple(__version__):
+            self.state = "uptodate"
+            print(f"[update] al día ({__version__}; última publicada {info and info['version']})")
             return
+        self.version = info["version"]
         DIR.mkdir(parents=True, exist_ok=True)
         dest = DIR / f"{info['version']}.exe"
         if not dest.exists():
             print(f"[update] hay versión nueva {info['version']}: descargando…")
-            if not download(info, dest):
+            self.state, self.progress = "downloading", 0.0
+            if not download(info, dest, lambda f: setattr(self, "progress", f)):
                 print("[update] la descarga no coincide con la publicada; se descarta")
+                self.state = "error"
                 return
             print("[update] descargada y verificada")
-        while not self.is_idle():
-            time.sleep(30)
+        self.state = "ready"
+        if self.on_ready:
+            self.on_ready(info["version"])
+        while not (self._now.is_set() or self.is_idle()):
+            self._now.wait(30)
+        self.state = "installing"
         (DIR / "pending.txt").write_text(info["version"], encoding="utf-8")
         print(f"[update] instalando {info['version']}")
         self.on_install(info["version"], dest)

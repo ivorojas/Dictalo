@@ -332,7 +332,20 @@ def main():
             _icon_ref["icon"].update_menu()
         return ok
 
-    settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey)
+    def _idle():
+        return (_ready.is_set() and not recorder.is_recording and not _busy.is_set()
+                and time.time() - _last_use["t"] > updater.IDLE_S)
+
+    def _close_for_update():
+        open_key.stop()
+        icon.stop()
+
+    upd = None
+    if getattr(sys, "frozen", False) and config.auto_update:
+        upd = _start_updater(_notify, _idle, _close_for_update)
+
+    settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey,
+                       updates=upd)
 
     def do_settings(icon, item):
         overlay.root.after(0, lambda: open_settings(overlay.root, config, **settings_kw))
@@ -363,16 +376,6 @@ def main():
     _icon_ref["icon"] = icon
     icon.run_detached()
     print("Tray arriba — cargando modelo en 2do plano...")
-    def _idle():
-        return (_ready.is_set() and not recorder.is_recording and not _busy.is_set()
-                and time.time() - _last_use["t"] > updater.IDLE_S)
-
-    def _close_for_update():
-        open_key.stop()
-        icon.stop()
-
-    if getattr(sys, "frozen", False) and config.auto_update:
-        _start_updater(_notify, _idle, _close_for_update)
     overlay.run()
 
 
@@ -391,7 +394,11 @@ def _start_updater(notify, is_idle, stop):
         stop()
         os._exit(0)
 
-    updater.Updater(is_idle, install)
+    def ready(version):
+        notify(f"La versión {version} está lista: se instala sola cuando no estés dictando "
+               "(o ya mismo desde Ajustes).")
+
+    return updater.Updater(is_idle, install, ready)
 
 
 if __name__ == "__main__":

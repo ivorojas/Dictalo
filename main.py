@@ -362,13 +362,35 @@ def main():
             return ("Cargando modelo", "wait")
         return (f"Listo · {transcriber.device}", "ok")
 
-    def _set_open_hotkey(key):
-        ok = open_key.set(key)
-        print(f"[atajo] abrir Ajustes: {globalkey.label(key)} "
+    def _arm_global(hk, key, what):
+        ok = hk.set(key)
+        print(f"[atajo] {what}: {globalkey.label(key)} "
               f"({'activo' if ok else 'ya lo usa otra app' if ok is False else 'desactivado'})")
         if _icon_ref["icon"]:
             _icon_ref["icon"].update_menu()
         return ok
+
+    def _set_open_hotkey(key):
+        return _arm_global(open_key, key, "abrir Ajustes")
+
+    def _set_copy_hotkey(key):
+        return _arm_global(copy_key, key, "copiar el último dictado")
+
+    def copy_last(*_):
+        """Atajo (Alt+F1) o menú: el último dictado al portapapeles, sin abrir nada. Solo
+        cuando lo pedís: si no, el portapapeles queda con lo que hayas copiado vos."""
+        items = history.get()
+        if not items:
+            sounds.error()
+            print("[copiar] no hay dictados para copiar")
+            return
+        from injector import _clipboard_set
+        if _clipboard_set(items[0]["text"]):
+            sounds.done()
+            print("[copiar] último dictado copiado")
+        else:
+            sounds.error()
+            print("[copiar] no pude usar el portapapeles")
 
     def _idle():
         return (_ready.is_set() and not recorder.is_recording and not _busy.is_set()
@@ -376,6 +398,7 @@ def main():
 
     def _close_for_update():
         open_key.stop()
+        copy_key.stop()
         icon.stop()
 
     upd = None
@@ -405,7 +428,7 @@ def main():
         threading.Thread(target=reload, daemon=True).start()
 
     settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey,
-                       updates=upd, on_model=_set_model,
+                       on_copy_hotkey=_set_copy_hotkey, updates=upd, on_model=_set_model,
                        stt_device=lambda: transcriber.device if _ready.is_set() else None)
 
     def do_settings(icon, item):
@@ -418,10 +441,13 @@ def main():
 
     open_key = globalkey.GlobalHotkey(_open_key_pressed)
     _set_open_hotkey(config.open_hotkey)
+    copy_key = globalkey.GlobalHotkey(copy_last)
+    _set_copy_hotkey(config.copy_hotkey)
 
     def do_quit(icon, item):
         print("[salida] Salir desde el menú del ícono")
         open_key.stop()
+        copy_key.stop()
         icon.stop()
         overlay.stop()
 
@@ -465,6 +491,9 @@ def main():
         pystray.MenuItem(lambda item: "Ajustes" if config.open_hotkey == "none"
                          else f"Ajustes ({globalkey.label(config.open_hotkey)})",
                          do_settings, default=True),  # doble-clic abre esto
+        pystray.MenuItem(lambda item: "Copiar el último dictado" if config.copy_hotkey == "none"
+                         else f"Copiar el último dictado ({globalkey.label(config.copy_hotkey)})",
+                         copy_last),
         pystray.MenuItem(_update_label, do_update, visible=upd is not None),
         pystray.MenuItem("Salir", do_quit),
     )

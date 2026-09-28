@@ -122,7 +122,7 @@ class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
     def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None,
-                 on_model=None, stt_device=None):
+                 on_model=None, stt_device=None, on_copy_hotkey=None):
         from injector import _clipboard_set
         self.config = config
         self.updates = updates          # updater.Updater (None fuera de la app instalada)
@@ -131,6 +131,7 @@ class Context:
         self.save = config.save
         self.on_hotkey = on_hotkey or (lambda: None)
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
+        self.on_copy_hotkey = on_copy_hotkey or (lambda key: None)
         self.status = status or (lambda: ("Listo", "ok"))
         self.history = history.get
         self.history_version = lambda: history.version
@@ -160,7 +161,8 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", sound_pack="suave",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1",
+        sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
         vocabulary="Claude, GitHub, Python, React, TypeScript, Docker, Kubernetes, Figma, Notion, "
@@ -171,6 +173,7 @@ def sample_context():
                                 check_now=lambda: None, install_now=lambda: None),
         on_model=lambda name: None, stt_device=lambda: "CPU",
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
+        on_copy_hotkey=lambda key: True,
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
@@ -283,6 +286,14 @@ class SettingsView(_Toast):
                                       self._set_open_hotkey, height=34)
         self.open_keys.pack(fill="x")
         ui.separator(b).pack(fill="x", pady=18)
+        ui.label(b, "Atajo para copiar el último dictado", F.body_sb).pack(anchor="w")
+        ui.label(b, "Lo copia al portapapeles sin abrir nada, para volver a pegarlo donde quieras.",
+                 F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
+        self.copy_keys = ui.ChipGroup(b, globalkey.OPTIONS,
+                                      getattr(self.ctx.config, "copy_hotkey", "alt+f1"),
+                                      self._set_copy_hotkey, height=34)
+        self.copy_keys.pack(fill="x")
+        ui.separator(b).pack(fill="x", pady=18)
         ui.label(b, "Sonidos", F.body_sb).pack(anchor="w")
         ui.label(b, "Al empezar, al terminar y si algo falla. Al elegir uno suena de muestra.",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
@@ -308,12 +319,26 @@ class SettingsView(_Toast):
         self._refresh_header()
 
     def _set_open_hotkey(self, key):
-        old = self.ctx.config.open_hotkey
-        self.ctx.config.open_hotkey = key
-        if self.ctx.on_open_hotkey(key) is False:
-            self.ctx.config.open_hotkey = old
-            self.ctx.on_open_hotkey(old)
-            self.open_keys.set(old)
+        self._set_global("open_hotkey", "copy_hotkey", key, self.open_keys, self.ctx.on_open_hotkey,
+                         "copiar el último dictado")
+
+    def _set_copy_hotkey(self, key):
+        self._set_global("copy_hotkey", "open_hotkey", key, self.copy_keys, self.ctx.on_copy_hotkey,
+                         "abrir esta ventana")
+
+    def _set_global(self, field, other, key, chips, register, other_what):
+        """Cambia un atajo global; vuelve atrás si ya lo usa el otro atajo o si otra app lo tiene."""
+        cfg = self.ctx.config
+        old = getattr(cfg, field)
+        if key != "none" and key == getattr(cfg, other, None):
+            chips.set(old)
+            self._toast(f"{globalkey.label(key)} ya es el atajo para {other_what}", ok=False)
+            return
+        setattr(cfg, field, key)
+        if register(key) is False:
+            setattr(cfg, field, old)
+            register(old)
+            chips.set(old)
             self._toast(f"{globalkey.label(key)} ya lo usa otra app, elegí otro", ok=False)
             return
         self._saved()
@@ -944,7 +969,7 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
 
 
 def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
-                  updates=None, on_model=None, stt_device=None):
+                  updates=None, on_model=None, stt_device=None, on_copy_hotkey=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -962,7 +987,7 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
     view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates,
-                                     on_model, stt_device))
+                                     on_model, stt_device, on_copy_hotkey))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))
@@ -1021,6 +1046,11 @@ def selftest(root):
             ctx.updates.state, ctx.updates.progress = state, 0.42
             view._refresh_update()
     ctx.updates.state = "uptodate"
+    view._set_copy_hotkey("ctrl+f1")          # el mismo que abrir: tiene que rechazarlo
+    view._set_copy_hotkey("shift+f1")
+    if (ctx.config.open_hotkey, ctx.config.copy_hotkey) != ("ctrl+f1", "shift+f1"):
+        raise RuntimeError("los dos atajos globales quedaron iguales")
+    ctx.config.copy_hotkey = "alt+f1"
     win.destroy()
     ui.shape(300, 120, 14, fill=ui.SURFACE, border=ui.BORDER)
     ui.shape(120, 34, 17, grad=(ui.CYAN, ui.VIOLET))

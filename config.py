@@ -57,6 +57,7 @@ class Config:
     hotkey: str = "<f9>"
     hotkey_display: str = "F9"
     open_hotkey: str = "ctrl+f1"   # abre Ajustes con el historial arriba (ver globalkey.OPTIONS)
+    copy_hotkey: str = "alt+f1"    # copia el último dictado al portapapeles, sin abrir nada
 
     # Ventanita flotante: estilo elegido (id de preset, "custom" o "mine:<nombre>"),
     # el personalizado en edición y los guardados por el usuario (ver looks.py)
@@ -78,9 +79,12 @@ class Config:
         if not PREFS_PATH.exists():
             return
         try:
-            for k, v in json.loads(PREFS_PATH.read_text(encoding="utf-8")).items():
+            data = json.loads(PREFS_PATH.read_text(encoding="utf-8"))
+            for k, v in data.items():
                 if hasattr(self, k) and k != "gemini_api_key":
                     setattr(self, k, v)
+            if "copy_hotkey" not in data and self.open_hotkey == self.copy_hotkey:
+                self.open_hotkey = "ctrl+f1"   # antes de v1.2.13 Alt+F1 solo podía abrir Ajustes
         except Exception:
             pass
 

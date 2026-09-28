@@ -118,6 +118,8 @@ Hover a style to preview it live; everything applies instantly.
 - **<kbd>Ctrl</kbd>+<kbd>F1</kbd>** from any app opens Settings with your history on top: press <kbd>Enter</kbd>
   to copy your last dictation and close it (focus goes back to where you were, ready for <kbd>Ctrl</kbd>+<kbd>V</kbd>),
   or <kbd>Esc</kbd> to close. Press <kbd>Ctrl</kbd>+<kbd>F1</kbd> again to hide it. You can change or disable it in Settings.
+- **<kbd>Alt</kbd>+<kbd>F1</kbd>** copies your last dictation to the clipboard without opening anything, so you can
+  paste it again anywhere. The clipboard only changes when you press it. Both shortcuts can be changed in Settings.
 - **Double-click the tray icon** to open Settings.
 - Quit from the tray icon: **Salir**.
 

@@ -51,6 +51,10 @@ globalkey.py   atajo global para abrir Ajustes (Ctrl+F1 por defecto, config.open
                su propio hilo (no hook): consume la combinación y devuelve False si otra app ya la tiene.
                La misma tecla abre y cierra (si está abierta, aunque sea detrás de otra ventana, la cierra).
                En Ajustes, Enter copia el último dictado, cierra y devuelve el foco a donde estabas; Esc cierra.
+               Segundo atajo global (v1.2.13): `config.copy_hotkey`, Alt+F1 por defecto = copiar el último
+               dictado sin abrir nada (`main.copy_last`, suena "listo"/"error"). El portapapeles SOLO cambia
+               al apretarlo. Ajustes no deja poner el mismo atajo en los dos. Prefs viejos con
+               open_hotkey=alt+f1 y sin copy_hotkey → open pasa a ctrl+f1 (config._load).
 updater.py     auto-actualización (solo en el .exe): cada 6 h consulta el último release de GitHub; si es
                más nuevo baja DictadoApp-Setup.exe a ~/.dictado/update, verifica sha256 (el "digest" de la API)
                y, con 2 min sin dictar, suelta el mutex, lanza el instalador /VERYSILENT vía cmd (que al

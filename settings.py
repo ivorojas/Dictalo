@@ -885,23 +885,28 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.bind("<Return>", lambda e: view.copy_latest_and_close())
 
 
-def settings_focused():
-    return _win is not None and _win.winfo_exists() and ui.foreground() == ui.hwnd_of(_win)
+def settings_open():
+    return _win is not None and _win.winfo_exists() and _win.state() == "normal"
 
 
 def close_settings():
+    """Cierra Ajustes. Si estabas en ella, el foco vuelve a la ventana desde donde la
+    abriste; si estabas en otra app, no se toca."""
     global _win
+    focused = False
     if _win is not None and _win.winfo_exists():
+        focused = ui.foreground() == ui.hwnd_of(_win)
         _win.destroy()
     _win = None
-    if _back_to:
+    if focused and _back_to:
         from injector import _focus_window
         _focus_window(_back_to)
 
 
 def toggle_settings(root, config, back_to=0, **kw):
-    """Lo que hace el atajo global: abre Ajustes al frente o, si ya está al frente, la cierra."""
-    if settings_focused():
+    """El atajo global abre y cierra con la misma tecla: si Ajustes está abierta (aunque
+    esté detrás de otra ventana) la cierra; si está cerrada o minimizada, la abre al frente."""
+    if settings_open():
         close_settings()
     else:
         open_settings(root, config, back_to=back_to, **kw)

@@ -9,6 +9,7 @@ import ctypes
 import faulthandler
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -105,6 +106,7 @@ import pystray
 from pynput import keyboard as kb
 
 import globalkey
+import remote
 import updater
 import sounds
 import history
@@ -112,7 +114,7 @@ import looks
 import ui
 from brand import APP_NAME, __version__, make_tray_icon
 from config import Config
-from recorder import Recorder
+from recorder import NBANDS, Recorder
 from transcriber import Transcriber
 from cleaner import Cleaner
 from injector import Injector, capture_foreground
@@ -196,12 +198,16 @@ def main():
     _icon_ref = {"icon": None}
     _tray = {False: make_tray_icon(False), True: make_tray_icon(True)}
 
+    role = config.remote_role if config.remote_role in ("main", "terminal") else "off"
+    print(f"  Dos PCs (Cruce): {role}")
+
     def _warmup():
-        transcriber.load()
-        recorder.warmup()
+        if role != "terminal":             # la terminal no graba ni transcribe: no carga el modelo
+            transcriber.load()
+            recorder.warmup()
         history.get()          # de paso, borra lo que ya venció
         _ready.set()
-        print("Listo para dictar. ✓")
+        print("Listo para dictar. ✓" if role != "terminal" else "Listo: dicta con la PC principal. ✓")
         sounds.ready()
     threading.Thread(target=_warmup, daemon=True).start()
 
@@ -225,25 +231,60 @@ def main():
 
     _last_use = {"t": time.time()}
 
-    def on_toggle():
+    # Dos PCs: `origin` es de dónde vino el F9 ("local" o "remote" = la otra PC vía Cruce). Un
+    # dictado se devuelve a donde arrancó (_rec["origin"]): acá se pega o suena como siempre;
+    # para "remote" se le mandan a la otra PC los estados (ventanita) y el texto.
+    _rec = {"origin": "local"}
+
+    def _show(origin, state):
+        if origin == "remote":
+            remote.send({"t": "state", "s": state})
+        else:
+            overlay.set_state(state)
+
+    def _fail(origin, msg=None):
+        if origin == "remote":
+            remote.send({"t": "error", "msg": msg or ""})
+        else:
+            sounds.error()
+            if msg:
+                _notify(msg)
+
+    def _stream_levels(g):
+        """Mientras graba un dictado de la otra PC, le manda el espectro (~10 por segundo)."""
+        while recorder.is_recording and _gen["n"] == g:
+            remote.send({"t": "state", "s": "recording", "b": [round(float(b), 2) for b in recorder.bands]})
+            time.sleep(0.1)
+
+    def on_toggle(origin="local"):
         _last_use["t"] = time.time()
+        if origin == "local" and role != "off" and remote.driving_other():
+            print("[rec] F9 ignorado: el cursor está en la otra PC (Cruce se lo manda allá)")
+            return
+        if role == "terminal":
+            return _toggle_on_main()
         if not _ready.is_set():
-            sounds.wait()
+            if origin == "remote":
+                _fail(origin, "La PC principal todavía está cargando el modelo.")
+            else:
+                sounds.wait()
             print("[rec] aún cargando el modelo")
             return
 
         if recorder.is_recording:
-            end_hwnd = capture_foreground()      # donde estás AL CORTAR: ahí se pega
+            origin = _rec["origin"]              # se devuelve a donde arrancó
+            end_hwnd = capture_foreground() if origin == "local" else 0   # donde estás AL CORTAR
             set_rec_icon(False)
-            overlay.set_state("processing")
+            _show(origin, "processing")
             audio = recorder.stop()
             n = 0 if audio is None else len(audio)
             tgt = end_hwnd or _target["hwnd"]    # si al cortar no hay ventana válida, la del inicio
             print(f"[rec] stop — {n / config.sample_rate:.1f}s · pico {recorder.peak:.2e} "
-                  f"rms {recorder.last_rms:.4f} · pega en={tgt}")
+                  f"rms {recorder.last_rms:.4f} · pega en={'la otra PC' if origin == 'remote' else tgt}")
             if audio is None or n < config.min_frames:
-                sounds.stop()
-                overlay.set_state("hidden")
+                if origin == "local":
+                    sounds.stop()
+                _show(origin, "hidden")
                 return
             if recorder.peak < _DEAD_PEAK:
                 # Silencio digital puro: el dispositivo (p.ej. una interfaz USB) quedó
@@ -251,9 +292,8 @@ def main():
                 # transcribir nada y quedar en silencio.
                 print("[rec] el micrófono entregó silencio digital — reinicio el audio")
                 recorder.refresh()
-                sounds.error()
-                _notify("El micrófono no captó audio. Ya lo reinicié: probá de nuevo.")
-                overlay.set_state("hidden")
+                _fail(origin, "El micrófono no captó audio. Ya lo reinicié: probá de nuevo.")
+                _show(origin, "hidden")
                 return
             _busy.set()
 
@@ -263,12 +303,17 @@ def main():
                     print(f"[stt] {raw!r}")
                     if not raw:
                         recorder.refresh()          # por si el mic quedó en mal estado
-                        sounds.error()
-                        _notify("No se entendió nada del audio. Probá de nuevo.")
+                        _fail(origin, "No se entendió nada del audio. Probá de nuevo.")
                         return
                     text = cleaner.clean(raw)
                     history.add(text)               # respaldo, por si no se pega en ningún lado
-                    if injector.inject(text, tgt):
+                    if origin == "remote":
+                        if remote.send({"t": "text", "text": text}):
+                            print(f"[ok] enviado a la otra PC: {text}")
+                        else:
+                            sounds.error()
+                            _notify("No se pudo mandar el texto a la otra PC. Quedó en Ajustes → Historial.")
+                    elif injector.inject(text, tgt):
                         sounds.done()
                         print(f"[ok] {text}")
                     else:
@@ -276,40 +321,107 @@ def main():
                         _notify("No se pudo pegar. El texto quedó en Ajustes → Historial.")
                 except Exception as e:
                     print(f"[error] {e}")
-                    sounds.error()
+                    _fail(origin)
                 finally:
                     _busy.clear()
-                    overlay.set_state("hidden")
+                    _show(origin, "hidden")
             threading.Thread(target=work, daemon=True).start()
         else:
             if _busy.is_set():
-                sounds.wait()
+                if origin == "remote":
+                    _fail(origin, "La PC principal todavía está transcribiendo el dictado anterior.")
+                else:
+                    sounds.wait()
                 return
-            _target["hwnd"] = capture_foreground()   # respaldo por si al cortar no hay ventana válida
+            _rec["origin"] = origin
+            _target["hwnd"] = capture_foreground() if origin == "local" else 0
             try:
                 recorder.start()
             except Exception as e:
                 print(f"[rec] no pude abrir el micrófono: {e}")
-                sounds.error()
+                _fail(origin, "La PC principal no pudo abrir el micrófono.")
                 return
-            print(f"[rec] grabando (inicio en={_target['hwnd']}, mic={recorder.device_name()})")
-            sounds.start()
-            overlay.set_state("recording")
+            print(f"[rec] grabando (inicio en={'la otra PC' if origin == 'remote' else _target['hwnd']}, "
+                  f"mic={recorder.device_name()})")
             set_rec_icon(True)
 
             _gen["n"] += 1
             g = _gen["n"]
+            if origin == "remote":
+                threading.Thread(target=_stream_levels, args=(g,), daemon=True).start()
+            else:
+                sounds.start()
+                overlay.set_state("recording")
 
             def _check_mic():
                 # Aviso temprano: si a los 3s el mic sigue en silencio digital, que no
                 # hables 20s al vacío.
                 if recorder.is_recording and _gen["n"] == g and recorder.peak < _DEAD_PEAK:
                     print("[rec] 3s sin señal del micrófono — aviso")
-                    sounds.error()
-                    _notify("El micrófono no está captando audio. Cortá (F9) y probá de nuevo.")
+                    _fail(origin, "El micrófono no está captando audio. Cortá (F9) y probá de nuevo.")
             t = threading.Timer(3.0, _check_mic)
             t.daemon = True
             t.start()
+
+    # Terminal (esta PC no transcribe): F9 le pide el dictado a la principal y lo que vuelve
+    # (estados, texto) llega por _on_remote.
+    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0}
+
+    def _toggle_on_main():
+        if not remote.send({"t": "toggle"}):
+            sounds.error()
+            _notify("No se pudo llegar a la PC principal. ¿Está prendida, con Cruce conectado y "
+                    "Dictado App abierta?")
+            return
+        if _term["state"] == "hidden":
+            asked = _term["asked"] = time.time()
+
+            def _no_answer():
+                if _term["asked"] == asked and _term["state"] == "hidden":
+                    print("[cruce] la PC principal no respondió")
+                    sounds.error()
+                    _notify("La PC principal no respondió. ¿Tiene Dictado App abierta como Principal?")
+            threading.Timer(3.0, _no_answer).start()
+
+    def _on_remote(data):
+        kind = data.get("t")
+        if role == "main" and kind == "toggle":
+            _toggles.put("remote")
+        elif role == "terminal" and kind == "state":
+            state = data.get("s")
+            if state not in ("recording", "processing", "hidden"):
+                return
+            if state == "recording" and _term["state"] != "recording":
+                sounds.start()
+            if data.get("b"):
+                _term["bands"] = data["b"]
+            _term["state"] = state
+            set_rec_icon(state == "recording")
+            overlay.set_state(state)
+        elif role == "terminal" and kind == "text":
+            text = str(data.get("text", ""))
+            _term["state"] = "hidden"
+            overlay.set_state("hidden")
+            set_rec_icon(False)
+            if not text:
+                return
+            history.add(text)
+            if injector.inject(text, capture_foreground()):   # en el campo donde estás AHORA
+                sounds.done()
+                print(f"[ok] recibido de la PC principal: {text}")
+            else:
+                sounds.error()
+                _notify("No se pudo pegar. El texto quedó en Ajustes → Historial.")
+        elif role == "terminal" and kind == "error":
+            _term["state"] = "hidden"
+            overlay.set_state("hidden")
+            set_rec_icon(False)
+            sounds.error()
+            if data.get("msg"):
+                _notify(data["msg"])
+
+    if role == "terminal":
+        overlay.get_bands = lambda: _term["bands"]
 
     # pynput llama al callback DENTRO del hook de teclado de Windows. Si ahí se hace
     # algo lento (abrir el mic de una interfaz USB puede tardar cientos de ms),
@@ -320,9 +432,9 @@ def main():
 
     def _toggle_worker():
         while True:
-            _toggles.get()
+            origin = _toggles.get()
             try:
-                on_toggle()
+                on_toggle(origin)
             except Exception as e:
                 print(f"[error] toggle: {e}")
                 sounds.error()
@@ -339,12 +451,13 @@ def main():
                 old.stop()
             except Exception:
                 pass
-        lst = _HotKeys({config.hotkey: lambda: _toggles.put(1)})
+        lst = _HotKeys({config.hotkey: lambda: _toggles.put("local")})
         lst.daemon = True
         lst.start()
         _hk["listener"] = lst
 
     _arm_hotkey()
+    link = remote.Link(_on_remote) if role != "off" else None   # mensajes de la otra PC (Cruce)
 
     def _watchdog():
         """Tras suspender/resumir, Windows da de baja el hook de teclado de pynput
@@ -374,6 +487,8 @@ def main():
     def _status():
         if not _ready.is_set():
             return ("Cargando modelo", "wait")
+        if role == "terminal":
+            return ("Usa la PC principal", "ok") if link and link.connected else ("Sin Cruce", "wait")
         return (f"Listo · {transcriber.device}", "ok")
 
     def _arm_global(hk, key, what):
@@ -441,8 +556,21 @@ def main():
                 _ready.set()
         threading.Thread(target=reload, daemon=True).start()
 
+    def _restart(_role=None):
+        """Cambiar el papel de Dos PCs cambia qué se carga al arrancar: se reinicia sola. Suelta
+        los atajos y el mutex ANTES de abrir la nueva, así ella los puede tomar."""
+        print("[salida] reinicio para aplicar el cambio de Dos PCs")
+        open_key.stop()
+        copy_key.stop()
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_mutex["h"]))
+        args = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
+                                                                      os.path.abspath(sys.argv[0])]
+        subprocess.Popen(args, close_fds=True, creationflags=0x00000008)   # DETACHED_PROCESS
+        icon.stop()
+        os._exit(0)
+
     settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey,
-                       on_copy_hotkey=_set_copy_hotkey, updates=upd, on_model=_set_model,
+                       on_copy_hotkey=_set_copy_hotkey, on_role=_restart, updates=upd, on_model=_set_model,
                        stt_device=lambda: transcriber.device if _ready.is_set() else None)
 
     def do_settings(icon, item):

@@ -14,6 +14,7 @@ from PIL import ImageTk
 
 import globalkey
 import history
+import remote
 import looks
 import sounds
 import ui
@@ -122,7 +123,7 @@ class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
     def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None,
-                 on_model=None, stt_device=None, on_copy_hotkey=None):
+                 on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None):
         from injector import _clipboard_set
         self.config = config
         self.updates = updates          # updater.Updater (None fuera de la app instalada)
@@ -132,6 +133,7 @@ class Context:
         self.on_hotkey = on_hotkey or (lambda: None)
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
         self.on_copy_hotkey = on_copy_hotkey or (lambda key: None)
+        self.on_role = on_role or (lambda role: None)
         self.status = status or (lambda: ("Listo", "ok"))
         self.history = history.get
         self.history_version = lambda: history.version
@@ -161,7 +163,7 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", remote_role="off",
         sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
@@ -173,7 +175,7 @@ def sample_context():
                                 check_now=lambda: None, install_now=lambda: None),
         on_model=lambda name: None, stt_device=lambda: "CPU",
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
-        on_copy_hotkey=lambda key: True,
+        on_copy_hotkey=lambda key: True, on_role=lambda role: None,
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
@@ -219,6 +221,7 @@ class SettingsView(_Toast):
         self._dictado(root)
         self._ventanita(root)
         self._vocabulario(root)
+        self._dos_pcs(root)
         self._actualizaciones(root)
         self._footer(root)
         self._poll()
@@ -545,6 +548,33 @@ class SettingsView(_Toast):
 
     def _open_history(self):
         open_history(self.win, self.ctx)
+
+    # dos PCs con Cruce
+    def _dos_pcs(self, p):
+        mode, peer = remote.presence()
+        if mode is None and getattr(self.ctx.config, "remote_role", "off") == "off":
+            return                          # sin Cruce en esta PC la sección no aporta nada
+        self._section(p, "Dos PCs con Cruce")
+        card = ui.Card(p)
+        card.pack(fill="x", pady=(0, 28))
+        b = card.body
+        ui.label(b, "Si usás el teclado y el mouse de una PC en la otra con Cruce: la Principal graba y "
+                    "transcribe los dictados de las dos, y la otra solo muestra la ventanita y pega. "
+                    "El texto se pega en la PC donde apretaste F9.", F.small, ui.TEXT_2,
+                 wraplength=440).pack(anchor="w", pady=(0, 14))
+        self.roles = ui.ChipGroup(b, remote.ROLES, getattr(self.ctx.config, "remote_role", "off"),
+                                  self._set_role, height=34)
+        self.roles.pack(fill="x")
+        text =(f"Cruce está conectado con {peer}." if mode and peer else
+                "Cruce está abierto, pero sin la otra PC." if mode else "Cruce no está abierto en esta PC.")
+        ui.label(b, text + " Al cambiar esto, la app se reinicia sola.", F.tiny, ui.TEXT_3,
+                 wraplength=440).pack(anchor="w", pady=(12, 0))
+
+    def _set_role(self, role):
+        self.ctx.config.remote_role = role
+        self._saved()
+        self._toast("Reiniciando para aplicarlo…")
+        self.win.after(600, lambda: self.ctx.on_role(role))
 
     # actualizaciones
     def _actualizaciones(self, p):
@@ -969,7 +999,7 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
 
 
 def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
-                  updates=None, on_model=None, stt_device=None, on_copy_hotkey=None):
+                  updates=None, on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -987,7 +1017,7 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
     view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates,
-                                     on_model, stt_device, on_copy_hotkey))
+                                     on_model, stt_device, on_copy_hotkey, on_role))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))

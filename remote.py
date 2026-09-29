@@ -1,0 +1,122 @@
+"""Dictado entre dos PCs a través de Cruce (el compartidor de teclado y mouse del dueño).
+
+Papeles (config.remote_role):
+- "off": esta PC dicta sola (como siempre).
+- "main": esta PC graba y transcribe también los dictados que se empiezan en la otra.
+- "terminal": esta PC no graba ni transcribe (no carga el modelo): F9 le pide el dictado a la
+  principal, muestra la ventanita con lo que le llega y pega el texto acá.
+El texto se pega en la PC donde ARRANCÓ el dictado.
+
+Regla de F9 en las dos PCs: si Cruce dice que esta PC está manejando la otra (Mode=Remote), F9
+se ignora acá: Cruce ya se lo manda a la otra, que es donde está el cursor.
+
+De Cruce se usa:
+- el registro HKCU\\Software\\Cruce\\Presence (Mode, Peer, Pid): dónde está el cursor.
+- la API local por named pipe (una línea JSON por pedido) para pasar mensajes a la otra PC:
+  {"cmd":"send","app":"dictado","data":{...}} → {"ok":true}
+  {"cmd":"subscribe","app":"dictado"} → una línea {"from":..,"data":{..}} por mensaje recibido.
+Mensajes de Dictado: {"t":"toggle"} (terminal → principal); {"t":"state","s":"recording"|
+"processing"|"hidden","b":[bandas]}, {"t":"text","text":..} y {"t":"error","msg":..}
+(principal → terminal).
+"""
+import ctypes
+import io
+import json
+import threading
+import time
+import winreg
+from ctypes import wintypes
+
+PIPE = r"\\.\pipe\Cruce.Api"
+APP = "dictado"
+ROLES = [("Dicta sola", "off"), ("Principal", "main"), ("Usa la principal", "terminal")]
+
+_k32 = ctypes.WinDLL("kernel32")
+_k32.OpenProcess.restype = wintypes.HANDLE
+_k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+_k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def _alive(pid):
+    h = _k32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = wintypes.DWORD()
+    ok = _k32.GetExitCodeProcess(h, ctypes.byref(code))
+    _k32.CloseHandle(h)
+    return bool(ok) and code.value == 259          # STILL_ACTIVE
+
+
+def presence():
+    """(modo, peer) de Cruce: "Local" | "Remote" | "Controlled", o (None, "") si no corre."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Cruce\Presence") as k:
+            mode = winreg.QueryValueEx(k, "Mode")[0]
+            peer = winreg.QueryValueEx(k, "Peer")[0]
+            pid = winreg.QueryValueEx(k, "Pid")[0]
+    except OSError:
+        return None, ""
+    return (mode, peer) if _alive(pid) else (None, "")
+
+
+def driving_other():
+    """True si esta PC está manejando la otra (el cursor está allá)."""
+    return presence()[0] == "Remote"
+
+
+def _request(obj):
+    try:
+        with open(PIPE, "r+b", buffering=0) as f:
+            f.write((json.dumps(obj) + "\n").encode("utf-8"))
+            line = f.readline()
+        return json.loads(line) if line else None
+    except (OSError, ValueError):
+        return None
+
+
+def send(data):
+    """Manda un mensaje a la Dictado de la otra PC. False si Cruce o la otra PC no están."""
+    r = _request({"cmd": "send", "app": APP, "data": data})
+    return bool(r and r.get("ok"))
+
+
+class Link:
+    """Recibe los mensajes de la otra PC (`on_message(data)`); se reconecta solo si Cruce se
+    cierra o todavía no tiene la API."""
+
+    RETRY_S = 3
+
+    def __init__(self, on_message):
+        self.on_message = on_message
+        self.connected = False
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        logged = False
+        while True:
+            try:
+                with open(PIPE, "r+b", buffering=0) as f:
+                    f.write((json.dumps({"cmd": "subscribe", "app": APP}) + "\n").encode("utf-8"))
+                    self.connected = True
+                    print("[cruce] conectado")
+                    logged = False
+                    reader = io.BufferedReader(f, 65536)   # sin buffer, readline lee de a 1 byte
+                    for line in iter(reader.readline, b""):
+                        try:
+                            msg = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(msg, dict) and isinstance(msg.get("data"), dict):
+                            try:
+                                self.on_message(msg["data"])
+                            except Exception as e:
+                                print(f"[cruce] error manejando un mensaje: {e}")
+            except OSError as e:
+                if not logged:
+                    print(f"[cruce] sin conexión con Cruce ({e.__class__.__name__}); reintento solo")
+                    logged = True
+            if self.connected:
+                print("[cruce] desconectado")
+            self.connected = False
+            time.sleep(self.RETRY_S)

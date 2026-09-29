@@ -72,6 +72,10 @@ class Config:
     # Busca versiones nuevas en GitHub y se instala sola cuando no estás dictando (updater.py)
     auto_update: bool = True
 
+    # Dos PCs con Cruce (remote.py): "off" | "main" (graba y transcribe para las dos) |
+    # "terminal" (no transcribe: le pide el dictado a la principal y pega acá)
+    remote_role: str = "off"
+
     def __post_init__(self):
         self._load()
 

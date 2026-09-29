@@ -234,17 +234,20 @@ def main():
     # Dos PCs: `origin` es de dónde vino el F9 ("local" o "remote" = la otra PC vía Cruce). Un
     # dictado se devuelve a donde arrancó (_rec["origin"]): acá se pega o suena como siempre;
     # para "remote" se le mandan a la otra PC los estados (ventanita) y el texto.
-    _rec = {"origin": "local"}
+    _rec = {"origin": "local", "id": 0}   # id = ms de inicio del dictado (crece aunque la app se reinicie)
 
+    # Cruce manda los mensajes chicos por un canal ordenado y los grandes (un texto largo) por
+    # otro: entre ellos no hay orden. Cada mensaje lleva "id" = número de dictado para que la
+    # otra PC descarte lo viejo.
     def _show(origin, state):
         if origin == "remote":
-            remote.send({"t": "state", "s": state})
+            remote.send({"t": "state", "s": state, "id": _rec["id"]})
         else:
             overlay.set_state(state)
 
     def _fail(origin, msg=None):
         if origin == "remote":
-            remote.send({"t": "error", "msg": msg or ""})
+            remote.send({"t": "error", "msg": msg or "", "id": _rec["id"]})
         else:
             sounds.error()
             if msg:
@@ -253,7 +256,8 @@ def main():
     def _stream_levels(g):
         """Mientras graba un dictado de la otra PC, le manda el espectro (~10 por segundo)."""
         while recorder.is_recording and _gen["n"] == g:
-            remote.send({"t": "state", "s": "recording", "b": [round(float(b), 2) for b in recorder.bands]})
+            remote.send({"t": "state", "s": "recording", "id": _rec["id"],
+                         "b": [round(float(b), 2) for b in recorder.bands]})
             time.sleep(0.1)
 
     def on_toggle(origin="local"):
@@ -308,7 +312,7 @@ def main():
                     text = cleaner.clean(raw)
                     history.add(text)               # respaldo, por si no se pega en ningún lado
                     if origin == "remote":
-                        if remote.send({"t": "text", "text": text}):
+                        if remote.send({"t": "text", "text": text, "id": _rec["id"]}):
                             print(f"[ok] enviado a la otra PC: {text}")
                         else:
                             sounds.error()
@@ -333,7 +337,7 @@ def main():
                 else:
                     sounds.wait()
                 return
-            _rec["origin"] = origin
+            _rec["origin"], _rec["id"] = origin, int(time.time() * 1000)
             _target["hwnd"] = capture_foreground() if origin == "local" else 0
             try:
                 recorder.start()
@@ -365,7 +369,7 @@ def main():
 
     # Terminal (esta PC no transcribe): F9 le pide el dictado a la principal y lo que vuelve
     # (estados, texto) llega por _on_remote.
-    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0}
+    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0, "id": 0}
 
     def _toggle_on_main():
         if not remote.send({"t": "toggle"}):
@@ -388,21 +392,22 @@ def main():
         if role == "main" and kind == "toggle":
             _toggles.put("remote")
         elif role == "terminal" and kind == "state":
-            state = data.get("s")
-            if state not in ("recording", "processing", "hidden"):
-                return
-            if state == "recording" and _term["state"] != "recording":
+            state, did = data.get("s"), data.get("id", 0)
+            if state not in ("recording", "processing", "hidden") or did < _term["id"]:
+                return                                  # de un dictado anterior
+            if state == "recording" and (did != _term["id"] or _term["state"] != "recording"):
                 sounds.start()
             if data.get("b"):
                 _term["bands"] = data["b"]
-            _term["state"] = state
+            _term["id"], _term["state"] = did, state
             set_rec_icon(state == "recording")
             overlay.set_state(state)
         elif role == "terminal" and kind == "text":
             text = str(data.get("text", ""))
-            _term["state"] = "hidden"
-            overlay.set_state("hidden")
-            set_rec_icon(False)
+            if data.get("id", 0) >= _term["id"]:       # un texto que llega tarde no cierra un dictado nuevo
+                _term["state"] = "hidden"
+                overlay.set_state("hidden")
+                set_rec_icon(False)
             if not text:
                 return
             history.add(text)
@@ -413,6 +418,8 @@ def main():
                 sounds.error()
                 _notify("No se pudo pegar. El texto quedó en Ajustes → Historial.")
         elif role == "terminal" and kind == "error":
+            if data.get("id", 0) < _term["id"]:
+                return
             _term["state"] = "hidden"
             overlay.set_state("hidden")
             set_rec_icon(False)

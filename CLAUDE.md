@@ -93,8 +93,11 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   llegan y pega el texto). El texto vuelve a la PC donde ARRANCÓ el dictado (`_rec["origin"]`). Regla de F9
   en ambas: si Cruce dice Mode=Remote (esta PC maneja la otra), se ignora acá. Dónde está el cursor:
   registro HKCU\Software\Cruce\Presence (Mode/Peer/Pid, ya existe en Cruce). Mensajes: named pipe
-  `\\.\pipe\Cruce.Api` con state/send/subscribe (JSON por línea) — CONTRATO PROPUESTO, Cruce todavía no lo
-  implementó (se le pasó `para-cruce` vía Ivo). `tools\fake_cruce.py` lo simula para probar. Cambiar el
+  `\\.\pipe\Cruce.Api` con state/send/subscribe (JSON por línea), implementado en Cruce 1.17 (probado contra
+  el real: state con "version", suscripción, send al peer en ~3 ms). Cruce manda los mensajes chicos
+  (<~1000 B) por un canal ordenado y los grandes por TCP: SIN orden entre ellos → cada mensaje lleva
+  "id" = ms de inicio del dictado y la terminal descarta lo viejo. Extra de Cruce: subscribe "_state" empuja
+  cambios de modo. Con un suscriptor a "dictado", Cruce deja de retener F9. `tools\fake_cruce.py` lo simula. Cambiar el
   papel reinicia la app (`main._restart`). La sección de Ajustes solo aparece si Cruce está instalado.
 - **Mic = interfaz USB Focusrite** ("Analogue 1 + 2"): a veces entrega **silencio digital** (tras suspender,
   si otra app toma el dispositivo). Síntoma en el log: `[stt] proceso 0.01s` con audio de varios segundos y

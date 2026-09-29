@@ -1,11 +1,14 @@
 """Dictado entre dos PCs a través de Cruce (el compartidor de teclado y mouse del dueño).
 
-Papeles (config.remote_role):
+Papeles (config.pc_role; ver effective_role):
+- "auto" (por defecto): con placa NVIDIA es "main"; sin NVIDIA y con Cruce conectado a la otra
+  PC es "terminal"; si no, "off". Así no hay que configurar nada.
 - "off": esta PC dicta sola (como siempre).
 - "main": esta PC graba y transcribe también los dictados que se empiezan en la otra.
 - "terminal": esta PC no graba ni transcribe (no carga el modelo): F9 le pide el dictado a la
   principal, muestra la ventanita con lo que le llega y pega el texto acá.
-El texto se pega en la PC donde ARRANCÓ el dictado.
+El texto se pega en la PC que recibió el F9 DE CIERRE (con Cruce, las teclas van a la PC donde
+está el cursor: es donde estás apuntando, con cualquier combinación de teclado y mouse).
 
 Regla de F9 en las dos PCs: si Cruce dice que esta PC está manejando la otra (Mode=Remote), F9
 se ignora acá: Cruce ya se lo manda a la otra, que es donde está el cursor.
@@ -29,7 +32,26 @@ from ctypes import wintypes
 
 PIPE = r"\\.\pipe\Cruce.Api"
 APP = "dictado"
-ROLES = [("Dicta sola", "off"), ("Principal", "main"), ("Usa la principal", "terminal")]
+
+
+def has_cuda():
+    """¿Hay placa NVIDIA usable? (sin cargar el modelo)"""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
+def effective_role(chosen, cuda=None):
+    """Papel real de esta PC. En "auto": con NVIDIA siempre principal (sin Cruce no cambia nada);
+    sin NVIDIA, "terminal" solo si Cruce está conectado a la otra PC."""
+    if chosen in ("off", "main", "terminal"):
+        return chosen
+    if has_cuda() if cuda is None else cuda:
+        return "main"
+    mode, peer = presence()
+    return "terminal" if mode and peer else "off"
 
 _k32 = ctypes.WinDLL("kernel32")
 _k32.OpenProcess.restype = wintypes.HANDLE

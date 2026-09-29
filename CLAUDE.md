@@ -87,10 +87,16 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   para manejar el escritorio con el teclado de la notebook. Esas teclas llegan por SendInput con LLKHF_INJECTED
   y pynput GlobalHotKeys las DESCARTA → F9 muerto. `main._HotKeys` las acepta (v1.2.14; probado con la
   forma exacta de Cruce: wVk=0 + KEYEVENTF_SCANCODE + dwExtraInfo 0x43525543).
-- **Dos PCs con Cruce (remote.py, v1.2.15)**: `config.remote_role` = "off" (default, nada cambia) |
-  "main" (escritorio: graba y transcribe también lo que se empieza en la otra) | "terminal" (notebook: NO
-  carga modelo ni mic; F9 manda {"t":"toggle"} a la principal, muestra la ventanita con los estados que le
-  llegan y pega el texto). El texto vuelve a la PC donde ARRANCÓ el dictado (`_rec["origin"]`). Regla de F9
+- **Dos PCs con Cruce (remote.py)**. REGLA DEL DUEÑO (la repitió muchas veces, no cambiarla): el MOTOR es
+  SIEMPRE el escritorio (NVIDIA), apriete F9 donde lo apriete y con cualquier combinación de teclado/mouse
+  de las dos PCs; el texto se pega en la PC donde está al TERMINAR = la que recibe el F9 de cierre (con
+  Cruce las teclas van a la PC del cursor). `config.pc_role` (v1.2.17) = "auto" por defecto:
+  `remote.effective_role` → con NVIDIA "main" (sin opción en Ajustes); sin NVIDIA y Cruce conectado a la
+  otra PC "terminal" (NO carga modelo ni mic; F9 manda {"t":"toggle"}; muestra la ventanita con los estados
+  que llegan y pega el texto); si no, "off". En la notebook Ajustes muestra solo "Dónde se transcribe": En el
+  escritorio (auto) / En esta PC (off). `_role_watch` reinicia la app si Cruce se conecta/desconecta (1 min
+  estable, sin dictar). La ventanita se ve en las dos pantallas; los sonidos, donde estás. Error de la
+  v1.2.16: la notebook quedaba en "off" hasta elegir a mano → por eso ahora es automático. Regla de F9
   en ambas: si Cruce dice Mode=Remote (esta PC maneja la otra), se ignora acá. Dónde está el cursor:
   registro HKCU\Software\Cruce\Presence (Mode/Peer/Pid, ya existe en Cruce). Mensajes: named pipe
   `\\.\pipe\Cruce.Api` con state/send/subscribe (JSON por línea), implementado en Cruce 1.17 (probado contra

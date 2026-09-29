@@ -123,7 +123,7 @@ class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
     def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None,
-                 on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None):
+                 on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None, role_now=None):
         from injector import _clipboard_set
         self.config = config
         self.updates = updates          # updater.Updater (None fuera de la app instalada)
@@ -134,6 +134,7 @@ class Context:
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
         self.on_copy_hotkey = on_copy_hotkey or (lambda key: None)
         self.on_role = on_role or (lambda role: None)
+        self.role_now = role_now or (lambda: None)
         self.status = status or (lambda: ("Listo", "ok"))
         self.history = history.get
         self.history_version = lambda: history.version
@@ -163,7 +164,7 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", remote_role="off",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", pc_role="auto",
         sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
@@ -175,7 +176,7 @@ def sample_context():
                                 check_now=lambda: None, install_now=lambda: None),
         on_model=lambda name: None, stt_device=lambda: "CPU",
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
-        on_copy_hotkey=lambda key: True, on_role=lambda role: None,
+        on_copy_hotkey=lambda key: True, on_role=lambda role: None, role_now=lambda: "main",
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
@@ -551,27 +552,29 @@ class SettingsView(_Toast):
 
     # dos PCs con Cruce
     def _dos_pcs(self, p):
+        """Solo en la PC SIN placa NVIDIA (la notebook): dónde se transcribe. La que tiene NVIDIA
+        (el escritorio) es siempre el motor y no muestra nada."""
         mode, peer = remote.presence()
-        if mode is None and getattr(self.ctx.config, "remote_role", "off") == "off":
-            return                          # sin Cruce en esta PC la sección no aporta nada
-        self._section(p, "Dos PCs con Cruce")
+        if self.ctx.role_now() == "main" or mode is None:
+            return
+        chosen = "off" if getattr(self.ctx.config, "pc_role", "auto") == "off" else "auto"
+        self._section(p, "Dónde se transcribe")
         card = ui.Card(p)
         card.pack(fill="x", pady=(0, 28))
         b = card.body
-        ui.label(b, "Si usás el teclado y el mouse de una PC en la otra con Cruce: la Principal graba y "
-                    "transcribe los dictados de las dos, y la otra solo muestra la ventanita y pega. "
-                    "El texto se pega en la PC donde apretaste F9.", F.small, ui.TEXT_2,
-                 wraplength=440).pack(anchor="w", pady=(0, 14))
-        self.roles = ui.ChipGroup(b, remote.ROLES, getattr(self.ctx.config, "remote_role", "off"),
+        ui.label(b, "Con Cruce, el escritorio graba y transcribe con su placa de video, apretes F9 "
+                    "en la PC que apretes, y el texto se pega en la PC donde estás al terminar.",
+                 F.small, ui.TEXT_2, wraplength=440).pack(anchor="w", pady=(0, 14))
+        self.roles = ui.ChipGroup(b, [("En el escritorio", "auto"), ("En esta PC", "off")], chosen,
                                   self._set_role, height=34)
         self.roles.pack(fill="x")
-        text =(f"Cruce está conectado con {peer}." if mode and peer else
-                "Cruce está abierto, pero sin la otra PC." if mode else "Cruce no está abierto en esta PC.")
+        text = (f"Cruce está conectado con {peer}." if peer else "Cruce está abierto, pero sin la otra PC:"
+                " mientras tanto transcribe esta PC.")
         ui.label(b, text + " Al cambiar esto, la app se reinicia sola.", F.tiny, ui.TEXT_3,
                  wraplength=440).pack(anchor="w", pady=(12, 0))
 
     def _set_role(self, role):
-        self.ctx.config.remote_role = role
+        self.ctx.config.pc_role = role
         self._saved()
         self._toast("Reiniciando para aplicarlo…")
         self.win.after(600, lambda: self.ctx.on_role(role))
@@ -999,7 +1002,8 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
 
 
 def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
-                  updates=None, on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None):
+                  updates=None, on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None,
+                  role_now=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -1017,7 +1021,7 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
     view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates,
-                                     on_model, stt_device, on_copy_hotkey, on_role))
+                                     on_model, stt_device, on_copy_hotkey, on_role, role_now))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))
@@ -1082,6 +1086,13 @@ def selftest(root):
         raise RuntimeError("los dos atajos globales quedaron iguales")
     ctx.config.copy_hotkey = "alt+f1"
     win.destroy()
+    ctx.role_now = lambda: "terminal"          # la sección "Dónde se transcribe" de la notebook
+    win = tk.Toplevel(root)
+    win.withdraw()
+    SettingsView(win, ctx)
+    win.update_idletasks()
+    win.destroy()
+    ctx.role_now = lambda: "main"
     ui.shape(300, 120, 14, fill=ui.SURFACE, border=ui.BORDER)
     ui.shape(120, 34, 17, grad=(ui.CYAN, ui.VIOLET))
     for pid in looks.PRESET_IDS:

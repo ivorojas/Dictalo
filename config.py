@@ -72,9 +72,9 @@ class Config:
     # Busca versiones nuevas en GitHub y se instala sola cuando no estás dictando (updater.py)
     auto_update: bool = True
 
-    # Dos PCs con Cruce (remote.py): "off" | "main" (graba y transcribe para las dos) |
-    # "terminal" (no transcribe: le pide el dictado a la principal y pega acá)
-    remote_role: str = "off"
+    # Dos PCs con Cruce (remote.py): "auto" (con NVIDIA = principal; sin NVIDIA y con Cruce
+    # conectado = usa la principal; si no, dicta sola) | "off" | "main" | "terminal"
+    pc_role: str = "auto"
 
     def __post_init__(self):
         self._load()
@@ -89,6 +89,8 @@ class Config:
                     setattr(self, k, v)
             if "copy_hotkey" not in data and self.open_hotkey == self.copy_hotkey:
                 self.open_hotkey = "ctrl+f1"   # antes de v1.2.13 Alt+F1 solo podía abrir Ajustes
+            if "pc_role" not in data and data.get("remote_role") in ("main", "terminal"):
+                self.pc_role = data["remote_role"]   # v1.2.15-16: "off" era solo el default, pasa a auto
         except Exception:
             pass
 

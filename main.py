@@ -198,8 +198,9 @@ def main():
     _icon_ref = {"icon": None}
     _tray = {False: make_tray_icon(False), True: make_tray_icon(True)}
 
-    role = config.remote_role if config.remote_role in ("main", "terminal") else "off"
-    print(f"  Dos PCs (Cruce): {role}")
+    cuda = remote.has_cuda() if config.whisper_device == "cuda" else False
+    role = remote.effective_role(config.pc_role, cuda)
+    print(f"  Dos PCs (Cruce): {role} (elegido: {config.pc_role})")
 
     def _warmup():
         if role != "terminal":             # la terminal no graba ni transcribe: no carga el modelo
@@ -231,22 +232,24 @@ def main():
 
     _last_use = {"t": time.time()}
 
-    # Dos PCs: `origin` es de dónde vino el F9 ("local" o "remote" = la otra PC vía Cruce). Un
-    # dictado se devuelve a donde arrancó (_rec["origin"]): acá se pega o suena como siempre;
-    # para "remote" se le mandan a la otra PC los estados (ventanita) y el texto.
-    _rec = {"origin": "local", "id": 0}   # id = ms de inicio del dictado (crece aunque la app se reinicie)
+    # Dos PCs: esta PC (principal) graba y transcribe TODO, venga el F9 de acá o de la otra PC
+    # ("remote"). El texto se pega en la PC que recibió el F9 DE CIERRE: con Cruce, las teclas van
+    # a la PC donde está el cursor, así que es donde estás apuntando, con cualquier combinación de
+    # teclado y mouse. La ventanita se ve en las dos pantallas; los sonidos, donde estás.
+    _rec = {"id": 0, "away": False}   # id = ms de inicio del dictado (crece aunque la app se reinicie)
+
+    def _peer():
+        return role == "main" and link is not None and link.connected
 
     # Cruce manda los mensajes chicos por un canal ordenado y los grandes (un texto largo) por
-    # otro: entre ellos no hay orden. Cada mensaje lleva "id" = número de dictado para que la
-    # otra PC descarte lo viejo.
-    def _show(origin, state):
-        if origin == "remote":
-            remote.send({"t": "state", "s": state, "id": _rec["id"]})
-        else:
-            overlay.set_state(state)
+    # otro: entre ellos no hay orden. Cada mensaje lleva "id" para que la otra PC descarte lo viejo.
+    def _show(state, sound=False):
+        overlay.set_state(state)
+        if _peer():
+            remote.send({"t": "state", "s": state, "id": _rec["id"], "snd": sound})
 
-    def _fail(origin, msg=None):
-        if origin == "remote":
+    def _fail(msg=None):
+        if _rec["away"] and _peer():
             remote.send({"t": "error", "msg": msg or "", "id": _rec["id"]})
         else:
             sounds.error()
@@ -254,41 +257,44 @@ def main():
                 _notify(msg)
 
     def _stream_levels(g):
-        """Mientras graba un dictado de la otra PC, le manda el espectro (~10 por segundo)."""
+        """Mientras graba, le manda el espectro a la otra PC (~10 por segundo) para su ventanita."""
         while recorder.is_recording and _gen["n"] == g:
-            remote.send({"t": "state", "s": "recording", "id": _rec["id"],
-                         "b": [round(float(b), 2) for b in recorder.bands]})
+            if _peer():
+                remote.send({"t": "state", "s": "recording", "id": _rec["id"],
+                             "b": [round(float(b), 2) for b in recorder.bands]})
             time.sleep(0.1)
 
     def on_toggle(origin="local"):
         _last_use["t"] = time.time()
         if origin == "local" and role != "off" and remote.driving_other():
-            print("[rec] F9 ignorado: el cursor está en la otra PC (Cruce se lo manda allá)")
+            # El mouse está en la otra PC: Cruce le manda este F9 a ella (y ella, si es la
+            # terminal, nos lo devuelve como "remote"). Tomarlo acá también lo duplicaría.
+            print("[rec] F9 ignorado acá: el cursor está en la otra PC (llega por Cruce)")
             return
         if role == "terminal":
             return _toggle_on_main()
         if not _ready.is_set():
             if origin == "remote":
-                _fail(origin, "La PC principal todavía está cargando el modelo.")
+                remote.send({"t": "error", "msg": "La PC principal todavía está cargando el modelo."})
             else:
                 sounds.wait()
             print("[rec] aún cargando el modelo")
             return
 
         if recorder.is_recording:
-            origin = _rec["origin"]              # se devuelve a donde arrancó
-            end_hwnd = capture_foreground() if origin == "local" else 0   # donde estás AL CORTAR
+            away = _rec["away"] = origin == "remote"   # el F9 de cierre llegó de la otra PC: ahí se pega
+            end_hwnd = 0 if away else capture_foreground()
             set_rec_icon(False)
-            _show(origin, "processing")
+            _show("processing")
             audio = recorder.stop()
             n = 0 if audio is None else len(audio)
             tgt = end_hwnd or _target["hwnd"]    # si al cortar no hay ventana válida, la del inicio
             print(f"[rec] stop — {n / config.sample_rate:.1f}s · pico {recorder.peak:.2e} "
-                  f"rms {recorder.last_rms:.4f} · pega en={'la otra PC' if origin == 'remote' else tgt}")
+                  f"rms {recorder.last_rms:.4f} · pega en={'la otra PC' if away else tgt}")
             if audio is None or n < config.min_frames:
-                if origin == "local":
+                if not away:
                     sounds.stop()
-                _show(origin, "hidden")
+                _show("hidden")
                 return
             if recorder.peak < _DEAD_PEAK:
                 # Silencio digital puro: el dispositivo (p.ej. una interfaz USB) quedó
@@ -296,8 +302,8 @@ def main():
                 # transcribir nada y quedar en silencio.
                 print("[rec] el micrófono entregó silencio digital — reinicio el audio")
                 recorder.refresh()
-                _fail(origin, "El micrófono no captó audio. Ya lo reinicié: probá de nuevo.")
-                _show(origin, "hidden")
+                _fail("El micrófono no captó audio. Ya lo reinicié: probá de nuevo.")
+                _show("hidden")
                 return
             _busy.set()
 
@@ -307,16 +313,15 @@ def main():
                     print(f"[stt] {raw!r}")
                     if not raw:
                         recorder.refresh()          # por si el mic quedó en mal estado
-                        _fail(origin, "No se entendió nada del audio. Probá de nuevo.")
+                        _fail("No se entendió nada del audio. Probá de nuevo.")
                         return
                     text = cleaner.clean(raw)
                     history.add(text)               # respaldo, por si no se pega en ningún lado
-                    if origin == "remote":
-                        if remote.send({"t": "text", "text": text, "id": _rec["id"]}):
-                            print(f"[ok] enviado a la otra PC: {text}")
-                        else:
-                            sounds.error()
-                            _notify("No se pudo mandar el texto a la otra PC. Quedó en Ajustes → Historial.")
+                    if away and _peer() and remote.send({"t": "text", "text": text, "id": _rec["id"]}):
+                        print(f"[ok] enviado a la otra PC: {text}")
+                    elif away:
+                        sounds.error()
+                        _notify("No se pudo mandar el texto a la otra PC. Quedó en Ajustes → Historial.")
                     elif injector.inject(text, tgt):
                         sounds.done()
                         print(f"[ok] {text}")
@@ -325,44 +330,44 @@ def main():
                         _notify("No se pudo pegar. El texto quedó en Ajustes → Historial.")
                 except Exception as e:
                     print(f"[error] {e}")
-                    _fail(origin)
+                    _fail()
                 finally:
                     _busy.clear()
-                    _show(origin, "hidden")
+                    _show("hidden")
             threading.Thread(target=work, daemon=True).start()
         else:
             if _busy.is_set():
                 if origin == "remote":
-                    _fail(origin, "La PC principal todavía está transcribiendo el dictado anterior.")
+                    remote.send({"t": "error", "msg": "La PC principal todavía está transcribiendo el "
+                                                      "dictado anterior."})
                 else:
                     sounds.wait()
                 return
-            _rec["origin"], _rec["id"] = origin, int(time.time() * 1000)
-            _target["hwnd"] = capture_foreground() if origin == "local" else 0
+            away = _rec["away"] = origin == "remote"
+            _rec["id"] = int(time.time() * 1000)
+            _target["hwnd"] = 0 if away else capture_foreground()
             try:
                 recorder.start()
             except Exception as e:
                 print(f"[rec] no pude abrir el micrófono: {e}")
-                _fail(origin, "La PC principal no pudo abrir el micrófono.")
+                _fail("La PC principal no pudo abrir el micrófono.")
                 return
-            print(f"[rec] grabando (inicio en={'la otra PC' if origin == 'remote' else _target['hwnd']}, "
-                  f"mic={recorder.device_name()})")
+            print(f"[rec] grabando (F9 de {'la otra PC' if away else 'acá'}, mic={recorder.device_name()})")
             set_rec_icon(True)
 
             _gen["n"] += 1
             g = _gen["n"]
-            if origin == "remote":
-                threading.Thread(target=_stream_levels, args=(g,), daemon=True).start()
-            else:
+            if not away:
                 sounds.start()
-                overlay.set_state("recording")
+            _show("recording", sound=away)
+            threading.Thread(target=_stream_levels, args=(g,), daemon=True).start()
 
             def _check_mic():
                 # Aviso temprano: si a los 3s el mic sigue en silencio digital, que no
                 # hables 20s al vacío.
                 if recorder.is_recording and _gen["n"] == g and recorder.peak < _DEAD_PEAK:
                     print("[rec] 3s sin señal del micrófono — aviso")
-                    _fail(origin, "El micrófono no está captando audio. Cortá (F9) y probá de nuevo.")
+                    _fail("El micrófono no está captando audio. Cortá (F9) y probá de nuevo.")
             t = threading.Timer(3.0, _check_mic)
             t.daemon = True
             t.start()
@@ -395,7 +400,8 @@ def main():
             state, did = data.get("s"), data.get("id", 0)
             if state not in ("recording", "processing", "hidden") or did < _term["id"]:
                 return                                  # de un dictado anterior
-            if state == "recording" and (did != _term["id"] or _term["state"] != "recording"):
+            new = did != _term["id"] or _term["state"] != "recording"
+            if state == "recording" and new and data.get("snd"):   # suena donde está el mouse
                 sounds.start()
             if data.get("b"):
                 _term["bands"] = data["b"]
@@ -576,8 +582,30 @@ def main():
         icon.stop()
         os._exit(0)
 
+    def _role_watch():
+        """Automático sin NVIDIA: si Cruce se conecta o se desconecta de la otra PC, cambia de
+        papel (se reinicia) cuando no estás dictando. Espera 1 minuto estable: un corte breve de
+        Cruce no reinicia nada."""
+        since = None
+        while True:
+            time.sleep(15)
+            now = remote.effective_role(config.pc_role, cuda)
+            if now == role:
+                since = None
+                continue
+            since = since or time.time()
+            idle = not recorder.is_recording and not _busy.is_set() and _term["state"] == "hidden"
+            if time.time() - since >= 60 and idle:
+                print(f"[cruce] cambio de papel: {role} → {now}")
+                overlay.root.after(0, _restart)
+                return
+
+    if config.pc_role == "auto" and not cuda:
+        threading.Thread(target=_role_watch, daemon=True).start()
+
     settings_kw = dict(on_hotkey=_hotkey_changed, status=_status, on_open_hotkey=_set_open_hotkey,
-                       on_copy_hotkey=_set_copy_hotkey, on_role=_restart, updates=upd, on_model=_set_model,
+                       on_copy_hotkey=_set_copy_hotkey, on_role=_restart, role_now=lambda: role,
+                       updates=upd, on_model=_set_model,
                        stt_device=lambda: transcriber.device if _ready.is_set() else None)
 
     def do_settings(icon, item):

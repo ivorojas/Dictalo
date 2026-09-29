@@ -143,6 +143,20 @@ def _selftest_ui():
         ui.restore_foreground(fg)
 
 
+class _HotKeys(kb.GlobalHotKeys):
+    """GlobalHotKeys que también acepta teclas inyectadas. pynput las descarta, pero así
+    llegan las de Cruce (teclado de la notebook usado en esta PC, vía SendInput): sin
+    esto, F9 no respondía. Nuestro propio Ctrl+V inyectado no es un atajo: no hay eco."""
+
+    def _on_press(self, key, injected):
+        for hotkey in self._hotkeys:
+            hotkey.press(self.canonical(key))
+
+    def _on_release(self, key, injected):
+        for hotkey in self._hotkeys:
+            hotkey.release(self.canonical(key))
+
+
 _DEAD_PEAK = 1e-5   # ≈ -100 dBFS: por debajo, el mic entregó silencio digital (stream "muerto")
 
 
@@ -325,7 +339,7 @@ def main():
                 old.stop()
             except Exception:
                 pass
-        lst = kb.GlobalHotKeys({config.hotkey: lambda: _toggles.put(1)})
+        lst = _HotKeys({config.hotkey: lambda: _toggles.put(1)})
         lst.daemon = True
         lst.start()
         _hk["listener"] = lst

@@ -83,6 +83,11 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   la interfaz USB tarda) ni excepciones: Windows da de baja el hook en silencio / pynput frena el listener →
   F9 muerto. Por eso el hook solo hace `_toggles.put()` y `_toggle_worker` procesa en otro hilo. Cambiar el
   atajo desde Ajustes re-arma el listener en vivo (`_hotkey_changed`).
+- **Teclas inyectadas (Cruce)**: el dueño usa "Cruce" (su alternativa a Mouse Without Borders, otra app/sesión)
+  para manejar el escritorio con el teclado de la notebook. Esas teclas llegan por SendInput con LLKHF_INJECTED
+  y pynput GlobalHotKeys las DESCARTA → F9 muerto. `main._HotKeys` las acepta (v1.2.14). Pendiente: que el
+  escritorio grabe/transcriba y pegue en la notebook vía una API local de Cruce (/active, /paste); se le
+  mandó la propuesta a la sesión de Cruce, falta su respuesta.
 - **Mic = interfaz USB Focusrite** ("Analogue 1 + 2"): a veces entrega **silencio digital** (tras suspender,
   si otra app toma el dispositivo). Síntoma en el log: `[stt] proceso 0.01s` con audio de varios segundos y
   `[stt] ''`. Ahora: `pico < 1e-5` → refresh de PortAudio + sonido de error + notificación; aviso a los 3s si

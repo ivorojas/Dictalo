@@ -9,7 +9,6 @@ import numpy as np
 
 _WS = re.compile(r"\s+")
 _TAIL_PAD_S = 0.5   # colchón de silencio al final (anti-alucinación al cortar en seco)
-_EN_MIN = 0.01      # con ≥1% de inglés detectado el dictado va con "en" (ver _detect_es_en)
 
 # Whisper, entrenado con subtítulos, alucina créditos de subtitulado sobre el
 # silencio (típico al final): "Closed Captions by Red Bee Media", "Gracias por ver
@@ -20,7 +19,8 @@ _HALLU_END = re.compile(
     [\s.,!¡]*                         # separadores/puntuación previa
     (?:
         closed\ captions?\ by\ red\ bee\ media
-      | closed\ caption(?:s|ing|ed)?(?:\ (?:provided\ )?by\ [^.!?,]{1,40})?
+      | closed\ caption(?:s|ing|ed)?(?:\ (?:provided\ )?by       # "...by." suelto o "by" + un Nombre
+            (?:\ (?-i:[A-Z])[\w&.'-]*(?:\ (?-i:[A-Z])[\w&.'-]*){0,3})?)?
       | (?:www\.)?\s*[\w-]*\s*caption(?:s|ing)?\s*\.\s*(?:com|org|net)   # www.closedcaptioning.com
       | subtitl(?:es|ing)\ by\ red\ bee\ media
       | subtitles\ by\ the\ amara\.org\ community
@@ -149,6 +149,7 @@ class Transcriber:
         single_pass = lang is None and self.device == "CPU"
         if lang is None and not single_pass:
             lang = self._detect_es_en(audio)   # restringe la detección a en/es
+        t_lang = time.perf_counter() - t0
         # Colchón de silencio al final: si cortás el dictado justo al terminar de
         # hablar, el audio queda sin cierre y Whisper "completa"/alucina el final.
         # Este silencio le da un cierre limpio (y el speech_pad del VAD tiene de
@@ -162,8 +163,9 @@ class Transcriber:
             text = self._decode(audio, lang, 0.25, single_pass)
         clean = _strip_hallucinations(text)
         if clean != text:
-            print(f"[stt] alucinación de subtítulos filtrada del final")
-        print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s)")
+            print("[stt] alucinación de subtítulos filtrada del final")
+        print(f"[stt] proceso {time.perf_counter() - t0:.2f}s (audio {len(audio) / sr:.1f}s; "
+              f"idioma {t_lang:.2f}s)")
         return _finalize(clean)
 
     def _decode(self, audio, lang, vad_threshold, single_pass=False):
@@ -185,11 +187,10 @@ class Transcriber:
         try:
             _, _, probs = self._model.detect_language(audio)
             p = dict(probs)
-            # Mezclado → inglés. Whisper con "es" se come o deforma las frases en inglés de un
-            # dictado mezclado; con "en" transcribe las dos (el español sale en español). La
-            # detección casi no ve el inglés mezclado (2-11%), pero el español puro da ≤0.03%:
-            # con el corte en 1% el español puro sigue exactamente como antes. Medido: mismo texto
-            # en español (letra por letra) y mezclado con inglés al final de 30 errores a 0.
-            return "en" if p.get("en", 0.0) >= _EN_MIN else "es"
+            lang = "es" if p.get("es", 0.0) >= p.get("en", 0.0) else "en"
+            # Se anota para medir con dictados reales (v1.2.20 probó "≥1% de inglés = en" y en uso
+            # real coincidió con un "Closed Captioning by" y 13 s de espera: se volvió atrás).
+            print(f"[stt] idioma {lang} (inglés {p.get('en', 0.0) * 100:.2f}%)")
+            return lang
         except Exception:
             return None

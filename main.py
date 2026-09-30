@@ -119,7 +119,7 @@ from config import Config
 from recorder import NBANDS, Recorder
 from transcriber import Transcriber
 from cleaner import Cleaner
-from injector import Injector, capture_foreground
+from injector import Injector, capture_foreground, copy_selection
 from overlay import Overlay
 from splash import Splash
 from settings import open_settings, toggle_settings
@@ -441,7 +441,7 @@ def main():
         if role == "terminal":
             if _term["state"] != "recording" or _term["ai"]:
                 return
-            sel = injector.copy_selection()
+            sel = copy_selection()
             if not remote.send({"t": "ai", "sel": sel, "id": _term["id"]}):
                 sounds.error()
                 _notify("No se pudo llegar a la PC principal para el modo IA.")
@@ -454,7 +454,7 @@ def main():
                 sounds.error()
                 _notify("El modo IA funciona con la PC principal (la del escritorio).")
                 return
-            sel = _rec["sel"] = injector.copy_selection()
+            sel = _rec["sel"] = copy_selection()
             _rec["ai"] = True
         sounds.ai_on()
         overlay.set_ai(True)

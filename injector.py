@@ -203,11 +203,28 @@ def copy_selection(timeout=0.5):
         time.sleep(0.02)
     if user32.GetClipboardSequenceNumber() == seq:
         return ""                                               # no había nada seleccionado
-    time.sleep(0.03)
+    _clipboard_settle()             # algunas apps escriben en dos pasos: esperar a que terminen
     text = _clipboard_get() or ""
     if old is not None:
-        _clipboard_set(old)
+        for _ in range(4):          # devolver lo tuyo y verificar que ninguna escritura tardía lo pise
+            _clipboard_set(old)
+            mine = user32.GetClipboardSequenceNumber()
+            time.sleep(0.15)
+            if user32.GetClipboardSequenceNumber() == mine:
+                break
     return text.strip()
+
+
+def _clipboard_settle(quiet=0.12, limit=0.8):
+    """Espera hasta que el portapapeles lleve `quiet` s sin cambiar (máximo `limit` s)."""
+    last, t_last, end = user32.GetClipboardSequenceNumber(), time.time(), time.time() + limit
+    while time.time() < end:
+        cur = user32.GetClipboardSequenceNumber()
+        if cur != last:
+            last, t_last = cur, time.time()
+        elif time.time() - t_last >= quiet:
+            return
+        time.sleep(0.02)
 
 
 def _win_info(hwnd):

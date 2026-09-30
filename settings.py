@@ -124,7 +124,8 @@ class Context:
     """Lo que las vistas necesitan del resto de la app (inyectable para pruebas)."""
 
     def __init__(self, config, on_hotkey=None, status=None, on_open_hotkey=None, updates=None,
-                 on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None, role_now=None):
+                 on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None, role_now=None,
+                 on_ai_hotkey=None):
         from injector import _clipboard_set
         self.config = config
         self.updates = updates          # updater.Updater (None fuera de la app instalada)
@@ -134,6 +135,7 @@ class Context:
         self.on_hotkey = on_hotkey or (lambda: None)
         self.on_open_hotkey = on_open_hotkey or (lambda key: None)
         self.on_copy_hotkey = on_copy_hotkey or (lambda key: None)
+        self.on_ai_hotkey = on_ai_hotkey or (lambda key: None)
         self.on_role = on_role or (lambda role: None)
         self.role_now = role_now or (lambda: None)
         self.status = status or (lambda: ("Listo", "ok"))
@@ -177,7 +179,8 @@ def sample_context():
                                 check_now=lambda: None, install_now=lambda: None),
         on_model=lambda name: None, stt_device=lambda: "CPU",
         config=cfg, save=lambda: None, on_hotkey=lambda: None, on_open_hotkey=lambda key: True,
-        on_copy_hotkey=lambda key: True, on_role=lambda role: None, role_now=lambda: "main",
+        on_copy_hotkey=lambda key: True, on_ai_hotkey=lambda key: True, on_role=lambda role: None,
+        role_now=lambda: "main",
         set_sound=lambda pack: None,
         status=lambda: ("Listo · GPU", "ok"),
         history=lambda: list(items), history_version=lambda: 0, clear_history=items.clear,
@@ -360,12 +363,13 @@ class SettingsView(_Toast):
         card = ui.Card(p)
         card.pack(fill="x", pady=(0, 28))
         b = card.body
-        ui.label(b, "Mientras dictás, apretá la tecla del modo IA: tu dictado pasa a ser un pedido y se "
-                    "pega lo que escribe la IA (en inglés, salvo que pidas otro idioma). Si tenías texto "
-                    "seleccionado, trabaja sobre ese texto.", F.small, ui.TEXT_2,
+        ui.label(b, "Apretá la tecla del modo IA para dictar directo con IA (o mientras dictás, para "
+                    "pasar ese dictado a IA): tu dictado pasa a ser un pedido y se pega lo que escribe la "
+                    "IA, en inglés salvo que pidas otro idioma. Si tenías texto seleccionado, trabaja "
+                    "sobre ese texto. Otra vez la tecla (o F9) corta.", F.small, ui.TEXT_2,
                  wraplength=440).pack(anchor="w", pady=(0, 14))
         ui.label(b, "Tecla del modo IA", F.body_sb).pack(anchor="w")
-        ui.label(b, "Solo se usa mientras grabás; el resto del tiempo esa tecla anda normal.",
+        ui.label(b, "Queda reservada para Dictado App (tus otras apps no la reciben).",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
         self.ai_keys = ui.ChipGroup(b, globalkey.AI_OPTIONS, getattr(self.ctx.config, "ai_hotkey", "f10"),
                                     self._set_ai_key, height=34)
@@ -384,7 +388,14 @@ class SettingsView(_Toast):
             self.ai_keys.set(cfg.ai_hotkey)
             self._toast(f"{globalkey.label(key)} ya es tu atajo para dictar", ok=False)
             return
+        old = cfg.ai_hotkey
         cfg.ai_hotkey = key
+        if self.ctx.on_ai_hotkey(key) is False:          # otra app ya la tiene
+            cfg.ai_hotkey = old
+            self.ctx.on_ai_hotkey(old)
+            self.ai_keys.set(old)
+            self._toast(f"{globalkey.label(key)} ya lo usa otra app, elegí otra", ok=False)
+            return
         self._saved()
 
     def _set_sound(self, pack):
@@ -1043,7 +1054,7 @@ def open_looks(parent, ctx, on_change=None, on_close=None):
 
 def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None, back_to=0,
                   updates=None, on_model=None, stt_device=None, on_copy_hotkey=None, on_role=None,
-                  role_now=None):
+                  role_now=None, on_ai_hotkey=None):
     """`back_to`: la ventana donde estabas al abrirla con el atajo; al cerrarla con
     Enter o Esc el foco vuelve ahí (para pegar el dictado copiado con Ctrl+V)."""
     global _win, _back_to
@@ -1061,7 +1072,8 @@ def open_settings(root, config, on_hotkey=None, status=None, on_open_hotkey=None
     win.resizable(False, True)
     win.minsize(W_SETTINGS, 420)
     view = SettingsView(win, Context(config, on_hotkey, status, on_open_hotkey, updates,
-                                     on_model, stt_device, on_copy_hotkey, on_role, role_now))
+                                     on_model, stt_device, on_copy_hotkey, on_role, role_now,
+                                     on_ai_hotkey))
     ui.set_icon(win)
     max_h = win.winfo_screenheight() - 110
     ui.show_window(win, W_SETTINGS, max_h, fit=lambda: min(max_h, view.content_height()))

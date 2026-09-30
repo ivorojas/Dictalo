@@ -9,6 +9,7 @@ usa DefWindowProc como procedimiento (no hay callbacks de Python) y sus mensajes
 despacha el propio mainloop de Tk, que corre en el mismo hilo.
 """
 import ctypes
+import threading
 import time
 import tkinter as tk
 from ctypes import wintypes
@@ -191,20 +192,48 @@ class Overlay:
         self._state = "hidden"
         self._ai = None                          # momento en que se activó el modo IA (o None)
         self._bars = []
+        self._followed = 0.0
         self._t0 = time.perf_counter()
         self._last_err = None
         self._win = LayeredWindow()
         self.root.after(33, self._tick)
 
     def set_state(self, state):
+        if state == "recording" and self._state == "hidden":
+            # lo fijo del modo IA se calcula ya, en 2do plano: si lo activás, no hay tirón
+            threading.Thread(target=self._warm_ai, daemon=True).start()
+        changed = state != self._state
         self._state = state
         if state == "hidden":
             self._ai = None
+        elif changed:
+            self._kick()
+
+    def _kick(self):
+        """Dibuja YA (sin esperar al próximo cuadro, hasta 33 ms): la ventanita aparece al instante."""
+        try:
+            self.root.after(0, self._draw_now)
+        except RuntimeError:
+            pass
+
+    def _draw_now(self):
+        try:
+            if self._state in ("recording", "processing") and self.get_visible():
+                self._frame()
+        except Exception:
+            pass
+
+    def _warm_ai(self):
+        try:
+            looks.warm_ai(self.get_style())
+        except Exception:
+            pass
 
     def set_ai(self, on):
         """Modo IA: la versión "súper" de la ventanita (looks.ai_frame), con su animación de entrada."""
         if on and self._ai is None:
             self._ai = time.perf_counter()
+            self._kick()
         elif not on:
             self._ai = None
 
@@ -225,7 +254,8 @@ class Overlay:
             if str(e) != self._last_err:
                 self._last_err = str(e)
                 print(f"[overlay] {e}")
-        self.root.after(33, self._tick)   # ~30fps
+        entering = self._ai is not None and time.perf_counter() - self._ai < looks.AI_IN_S + 0.1
+        self.root.after(16 if entering else 33, self._tick)   # ~60fps en la entrada del modo IA, si no ~30
 
     def _frame(self):
         s = self.get_style()
@@ -236,7 +266,10 @@ class Overlay:
             target = [0.0] * n
         if len(self._bars) != n:
             self._bars = [0.0] * n
-        self._bars = looks.follow(self._bars, target, s["speed"])
+        now = time.perf_counter()
+        if now - self._followed >= 0.03:        # las barras siguen la voz a su ritmo de siempre (~30/s)
+            self._bars = looks.follow(self._bars, target, s["speed"])
+            self._followed = now
         now = time.perf_counter()
         img = looks.render(s, self._state, self._bars, now - self._t0)
         if self._ai is not None:

@@ -201,11 +201,22 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   (`injector.copy_selection`: Ctrl+C con scan codes, detecta por GetClipboardSequenceNumber, restaura el
   portapapeles; NO en terminales porque Ctrl+C corta procesos), y al cortar el dictado es el PEDIDO: Gemini
   (`ai.MODEL` = gemini-3.8-flash, elegido por el dueño: "Flash, no Lite") escribe el texto y se pega eso.
-  Salida en inglés salvo que pida otro idioma. La tecla se registra (RegisterHotKey) SOLO mientras se graba
-  (`main._arm_ai`), porque F10 abre menús en muchas apps. Siempre corre en la principal: la terminal manda
-  {"t":"ai","sel":...} y recibe "ai" en los estados/texto. Visual: `looks.ai_frame` (halo que late, insignia
-  ✦ que entra desde la derecha, destello al procesar) sobre cualquier estilo, ~5 ms/cuadro. Sonidos
-  `sounds.ai_on`/`ai_done`. La clave de Gemini: cifrada con DPAPI en ~/.dictado/gemini.key (ai.save_key);
+  Salida en inglés salvo que pida otro idioma. Desde v1.3.2 la tecla (el dueño usa F8) está SIEMPRE registrada
+  (RegisterHotKey, se la traga) y es "dictar con IA": sin grabar arranca un dictado ya en modo IA; grabando lo
+  pasa a IA; en modo IA lo corta. F9 y F8 van por la MISMA cola `_toggles` (tuplas (origen, ai)).
+  LATENCIA (pedido explícito "instantáneo"): al apretar, PRIMERO ventanita + sonido (overlay._kick dibuja ya,
+  sin esperar el tic de 33 ms) y DESPUÉS el mic (~10 ms). La copia de la selección (hasta ~1 s por el
+  portapapeles) corre en 2do plano (`_enable_ai`); work() la espera (`_rec["sel_ready"]`, máx 1.5 s) antes
+  de llamar a Gemini. La terminal es "optimista": muestra y suena al instante sin esperar a la principal
+  (no repite el sonido cuando llega la confirmación), manda {"t":"toggle","ai":bool} y la selección aparte
+  con {"t":"sel"}. Medido con simuladores de la app real (main.main() con dobles, sin tocar mic/portapapeles):
+  ventanita y sonido a 0.1 ms de la tecla en ambos papeles. Visual: `looks.ai_frame` (halo que late, insignia
+  ✦ que entra desde la derecha, destello al procesar) sobre cualquier estilo, ~5 ms/cuadro. Entrada (v1.3.2):
+  una sola curva (ease-out) para fundido/deslizamiento/halo + rebote leve en la escala, 0.55 s, la ventanita
+  sube a ~60 cuadros/s solo durante la entrada (las barras siguen a ~30/s) y lo fijo se precalcula al empezar
+  a grabar (`looks.warm_ai`). El dueño dijo que la entrada anterior se sentía trabada. Sonidos
+  `sounds.ai_on`/`ai_done` (v1.3.2): notas "de cristal" con coro, filtro de agudos, brillo de aire y
+  reverberación por convolución; el dueño dijo que los primeros sonaban "baratos". La clave de Gemini: cifrada con DPAPI en ~/.dictado/gemini.key (ai.save_key);
   la dejó configurada el asistente en el escritorio; NUNCA en prefs.json ni en el repo.
 
 ## Estado actual (v1.2.0)

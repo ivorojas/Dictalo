@@ -441,13 +441,18 @@ def _processing(img, d, s, g, t, S):
 
 # ── Modo IA: la versión "súper" de cualquier estilo ───────────────────────────
 AI_COLORS = ["#ffd54a", "#ff8a3d", "#ff4fd8", "#8b5cf6", "#ffd54a"]   # dorado → naranja → magenta → violeta
-AI_IN_S = 0.38          # duración de la entrada (insignia y halo)
+AI_IN_S = 0.55          # duración de la entrada (insignia y halo); overlay la anima a ~60 cuadros/s
 _ai_cache = {}
 
 
-def _ease_back(p):
+def _ease_out(p):
+    return 1 - (1 - p) ** 3
+
+
+def _ease_back(p, over=1.15):
+    """Sale rápido, se pasa apenas y vuelve: un rebote leve, no un salto."""
     p -= 1
-    return 1 + 2.7 * p ** 3 + 1.7 * p ** 2
+    return 1 + (over + 1) * p ** 3 + over * p ** 2
 
 
 def _star(d, cx, cy, r, ang, fill):
@@ -520,29 +525,39 @@ def ai_frame(img, s, state, t, p):
         _ai_cache[key] = base
     body, halo, grad = base
     p = max(0.0, min(1.0, p))
+    e = _ease_out(p)                # una sola curva para todo: fundido, deslizamiento y halo
     pulse = 0.6 + 0.4 * math.sin(t * 7)
-    alpha = np.clip(halo * pulse * p * 255, 0, 255).astype(np.uint8)
+    alpha = np.clip(halo * pulse * e * 255, 0, 255).astype(np.uint8)
     canvas = Image.fromarray(np.dstack([np.roll(grad, int(t * 90) % W2, axis=1), alpha]), "RGBA")
     canvas.alpha_composite(img, (ext, 0))
     if state == "processing":
         x0, x1 = ext + MARGIN, ext + MARGIN + g["w"]
         bx = x0 + ((t * 0.9) % 1.4 - 0.2) * (x1 - x0)
         xs = np.arange(W2, dtype=np.float32)
-        band = np.exp(-((xs - bx) / (g["h"] * 0.55)) ** 2)[None, :] * body * 110 * p
+        band = np.exp(-((xs - bx) / (g["h"] * 0.55)) ** 2)[None, :] * body * 110 * e
         shine = np.zeros((H, W2, 4), np.uint8)
         shine[..., :3] = 255
         shine[..., 3] = np.clip(band, 0, 255).astype(np.uint8)
         canvas.alpha_composite(Image.fromarray(shine, "RGBA"))
-    q = _ease_back(p) if p < 1 else 1.0
-    if q > 0.05:
+    q = 0.45 + 0.55 * _ease_back(p) if p < 1 else 1.0     # arranca a media escala: crece sin saltar
+    if e > 0.01:
         tile = _ai_badge(D, t, state)
         if q != 1.0:
             n = max(2, round(tile.size[0] * q))
-            tile = tile.resize((n, n), Image.LANCZOS)
-        cx = ext + MARGIN + g["w"] + gap + D / 2 - (1 - p) * D * 0.7
+            tile = tile.resize((n, n), Image.BICUBIC)
+        if e < 1.0:                                        # fundido de entrada
+            a = np.asarray(tile.getchannel("A"), np.float32) * e
+            tile.putalpha(Image.fromarray(a.astype(np.uint8), "L"))
+        cx = ext + MARGIN + g["w"] + gap + D / 2 - (1 - e) * D * 0.5
         cy = MARGIN + g["h"] / 2
         _paste(canvas, tile, round(cx - tile.size[0] / 2), round(cy - tile.size[1] / 2))
     return canvas
+
+
+def warm_ai(s):
+    """Precalcula lo fijo del modo IA para el estilo `s` (así el primer cuadro no se traba)."""
+    g = geometry(s)
+    ai_frame(render(s, "recording", [0.0] * g["n"], 0.0), s, "recording", 0.0, 1.0)
 
 
 def _paste(canvas, tile, x, y):

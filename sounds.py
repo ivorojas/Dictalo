@@ -98,15 +98,6 @@ def _build(pack):
             "wait": _note(415, 0.10, vol=0.16)}
 
 
-def _sparkle(dur=0.35, vol=0.07):
-    """Brillo: parciales agudos que titilan y se apagan (la "chispa" del modo IA)."""
-    t = _t(dur)
-    w = np.zeros(len(t), dtype=np.float32)
-    for f, ph in ((2637, 0.0), (3136, 1.3), (3951, 2.1), (4699, 0.7)):
-        w += np.sin(2 * np.pi * f * t + ph) * (0.5 + 0.5 * np.sin(2 * np.pi * 14 * t + ph))
-    return w / 4 * _env(len(t), attack=0.01, decay=5.0) * vol
-
-
 def _mix(*layers):
     n = max(len(x) for x in layers)
     out = np.zeros(n, dtype=np.float32)
@@ -115,11 +106,72 @@ def _mix(*layers):
     return out
 
 
+def _at(x, delay):
+    return np.concatenate([_gap(delay), x])
+
+
+def _lowpass(x, cutoff):
+    """Filtro de un polo (saca la aspereza digital de los agudos), aplicado en frecuencia: al
+    instante aunque el sonido sea largo. Con relleno de ceros, así no "da la vuelta"."""
+    a = np.exp(-2 * np.pi * cutoff / _SR)
+    size = 1 << int(np.ceil(np.log2(len(x) * 2)))
+    w = 2 * np.pi * np.fft.rfftfreq(size)
+    h = (1 - a) / (1 - a * np.exp(-1j * w))
+    return np.fft.irfft(np.fft.rfft(x, size) * h, size)[:len(x)].astype(np.float32)
+
+
+def _reverb(x, dur=1.1, mix=0.28, seed=3):
+    """Cola de sala: convolución con ruido que decae y se oscurece (respuesta de impulso sintética)."""
+    rng = np.random.default_rng(seed)
+    n = int(_SR * dur)
+    ir = rng.standard_normal(n).astype(np.float32) * np.exp(-np.linspace(0, 7.5, n, dtype=np.float32))
+    ir = _lowpass(ir, 3800)
+    ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9
+    size = 1 << int(np.ceil(np.log2(len(x) + n)))
+    wet = np.fft.irfft(np.fft.rfft(x, size) * np.fft.rfft(ir, size), size)[:len(x) + n].astype(np.float32)
+    return _mix(x * (1 - mix), wet * mix * 1.8)
+
+
+def _pluck(freq, dur, vol):
+    """Nota "de cristal": 3 capas levemente desafinadas (coro) + un armónico suave, ataque redondo."""
+    t = _t(dur)
+    w = np.zeros(len(t), dtype=np.float32)
+    for cents, amp in ((-6, 0.34), (0, 0.42), (6, 0.34)):
+        f = freq * 2 ** (cents / 1200)
+        w += amp * (np.sin(2 * np.pi * f * t) + 0.18 * np.sin(2 * np.pi * 2 * f * t))
+    return w * _env(len(t), attack=0.012, decay=4.2) * vol
+
+
+def _air(dur, vol, rise=True):
+    """Brillo de aire: ruido filtrado que crece (o se apaga) muy suave."""
+    rng = np.random.default_rng(11)
+    n = int(_SR * dur)
+    x = _lowpass(rng.standard_normal(n).astype(np.float32), 7000)
+    x -= _lowpass(x, 2500)                       # queda la banda alta, sin graves
+    shape = np.clip(np.sin(np.linspace(0, np.pi, n, dtype=np.float32)), 0, 1) ** (1.5 if rise else 3)
+    return x * shape * vol
+
+
+def _finish(x, peak=0.32):
+    x = _lowpass(x, 9000)
+    ramp = int(_SR * 0.01)
+    x[-ramp:] *= np.linspace(1, 0, ramp, dtype=np.float32)
+    return (x / (np.max(np.abs(x)) + 1e-9) * peak).astype(np.float32)
+
+
+def _ai_sounds():
+    # Activar: arpegio ascendente (Do mayor 9) de notas de cristal + brillo de aire que crece, en sala.
+    on = _mix(*[_at(_pluck(f, 0.5, 0.6 - i * 0.05), i * 0.045)
+                for i, f in enumerate((523.3, 659.3, 784.0, 987.8, 1174.7))],
+              _at(_air(0.45, 0.05), 0.05))
+    # Al pegar: acorde de campanas de cristal (quinta + octava) que se apaga despacio.
+    done = _mix(_pluck(784.0, 0.9, 0.5), _at(_pluck(1174.7, 0.85, 0.42), 0.03),
+                _at(_pluck(1568.0, 0.8, 0.32), 0.07), _at(_air(0.5, 0.035, rise=False), 0.02))
+    return {"ai_on": _finish(_reverb(on), 0.30), "ai_done": _finish(_reverb(done, 1.3), 0.28)}
+
+
 # Modo IA: iguales en todos los packs (se distinguen de propósito del resto); en "silencio", nada.
-_AI = {"ai_on": _mix(_seq(_note(523, 0.07, vol=0.15), _note(784, 0.07, vol=0.16), _note(1047, 0.07, vol=0.17),
-                          _note(1568, 0.22, vol=0.18)), _seq(_gap(0.12), _sparkle(0.4))),
-       "ai_done": _mix(_note(784, 0.45, vol=0.1), _note(988, 0.45, vol=0.09), _note(1175, 0.45, vol=0.09),
-                       _seq(_gap(0.05), _note(1568, 0.4, vol=0.12)), _seq(_gap(0.08), _sparkle(0.45)))}
+_AI = _ai_sounds()
 
 _sounds = dict(_build("suave"), **_AI)
 

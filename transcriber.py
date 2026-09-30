@@ -9,6 +9,7 @@ import numpy as np
 
 _WS = re.compile(r"\s+")
 _TAIL_PAD_S = 0.5   # colchón de silencio al final (anti-alucinación al cortar en seco)
+_EN_MIN = 0.01      # con ≥1% de inglés detectado el dictado va con "en" (ver _detect_es_en)
 
 # Whisper, entrenado con subtítulos, alucina créditos de subtitulado sobre el
 # silencio (típico al final): "Closed Captions by Red Bee Media", "Gracias por ver
@@ -184,6 +185,11 @@ class Transcriber:
         try:
             _, _, probs = self._model.detect_language(audio)
             p = dict(probs)
-            return "es" if p.get("es", 0.0) >= p.get("en", 0.0) else "en"
+            # Mezclado → inglés. Whisper con "es" se come o deforma las frases en inglés de un
+            # dictado mezclado; con "en" transcribe las dos (el español sale en español). La
+            # detección casi no ve el inglés mezclado (2-11%), pero el español puro da ≤0.03%:
+            # con el corte en 1% el español puro sigue exactamente como antes. Medido: mismo texto
+            # en español (letra por letra) y mezclado con inglés al final de 30 errores a 0.
+            return "en" if p.get("en", 0.0) >= _EN_MIN else "es"
         except Exception:
             return None

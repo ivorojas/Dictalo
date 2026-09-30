@@ -161,6 +161,14 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
 - **Modelo STT**: large-v3-turbo, CUDA int8, `beam_size=5`, `hotwords=vocabulario`,
   `condition_on_previous_text=False`. RTX 3070 del dueño → ~0.45 s por dictado corto (36% es detectar idioma).
   Medido: int8_float16/float16 no mejoran nada; nuestros cambios no afectan la precisión. Pesa la distancia al mic.
+- **Idioma (v1.2.20)**: con "es", Whisper se come/deforma las frases en inglés de un dictado MEZCLADO; con
+  "en" transcribe las dos (el español sale en español, letra por letra igual). La detección casi no ve el
+  inglés mezclado (2-11%) y el español puro da ≤0.03% → `_EN_MIN = 0.01`: ≥1% de inglés = "en". Medido en 15
+  casos sintéticos: 14 idénticos, mezclado con inglés al final de 30 errores a 0, ninguno peor.
+- **Transcribir de a tramos mientras se graba: PROBADO Y DESCARTADO (2026-09)**. Baja la espera al cortar
+  2-3× en dictados largos (80 s: ~2.5 s → ~1 s) y en español da igual, pero en dictados mezclados pierde
+  frases enteras en inglés (47-49 errores vs 0-36), incluso con idioma por tramo. El dueño mezcla idiomas y
+  pidió "solo positivo" → no. Pruebas y la versión con tramos quedaron en el scratchpad de esa sesión.
 - **Una sola versión para todas las PCs**: con NVIDIA usa CUDA (escritorio del dueño: RTX 3070, nada
   cambia ahí); sin NVIDIA (notebook Ryzen 5 7430U + Radeon integrada) cae a CPU int8 con todos los hilos,
   MISMO modelo y misma precisión (el dueño prefiere esperar más antes que perder calidad). Habla español e

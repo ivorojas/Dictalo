@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 APP_NAME = "Dictado App"
-__version__ = "1.2.19"
+__version__ = "1.2.20"
 
 _SS = 8
 _BRAND = ((34, 211, 238), (139, 92, 246))     # cian → violeta

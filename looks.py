@@ -439,6 +439,121 @@ def _processing(img, d, s, g, t, S):
                             fill=_rgba(_mix(c1, c2, p)))
 
 
+# ── Modo IA: la versión "súper" de cualquier estilo ───────────────────────────
+AI_COLORS = ["#ffd54a", "#ff8a3d", "#ff4fd8", "#8b5cf6", "#ffd54a"]   # dorado → naranja → magenta → violeta
+AI_IN_S = 0.38          # duración de la entrada (insignia y halo)
+_ai_cache = {}
+
+
+def _ease_back(p):
+    p -= 1
+    return 1 + 2.7 * p ** 3 + 1.7 * p ** 2
+
+
+def _star(d, cx, cy, r, ang, fill):
+    """Destello de 4 puntas (✦)."""
+    pts = []
+    for i in range(8):
+        a = ang + i * math.pi / 4
+        rr = r if i % 2 == 0 else r * 0.3
+        pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
+    d.polygon(pts, fill=fill)
+
+
+def _ai_badge_base(D):
+    """Parte fija de la insignia (resplandor + disco con degradé + aro), supersampleada ×3."""
+    key = ("badge", D)
+    base = _ai_cache.get(key)
+    if base is None:
+        S, pad = 3, D // 2
+        size = (D + 2 * pad) * S
+        c, R = size / 2, D / 2 * S
+        glow = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(glow).ellipse([c - R * 1.2, c - R * 1.2, c + R * 1.2, c + R * 1.2], fill=230)
+        base = Image.new("RGBA", (size, size), _rgba("#ffb347"))
+        base.putalpha(glow.filter(ImageFilter.GaussianBlur(pad * S / 2.2)))
+        disc = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(disc).ellipse([c - R, c - R, c + R, c + R], fill=255)
+        grad = _hgrad(size, size, ["#ffd54a", "#ff8a3d", "#ff4fd8"]).rotate(35).convert("RGBA")
+        grad.putalpha(disc)
+        base = Image.alpha_composite(base, grad)
+        ImageDraw.Draw(base).ellipse([c - R, c - R, c + R, c + R], outline=(255, 255, 255, 170),
+                                     width=max(1, int(1.4 * S)))
+        _ai_cache[key] = base
+    return base
+
+
+def _ai_badge(D, t, state):
+    """Insignia con el ✦ girando (más rápido mientras procesa)."""
+    tile = _ai_badge_base(D).copy()
+    size = tile.size[0]
+    c, R = size / 2, D / 2 * 3
+    d = ImageDraw.Draw(tile)
+    spin = t * (5.5 if state == "processing" else 1.6)
+    _star(d, c, c, R * 0.62, spin, (255, 255, 255, 255))
+    _star(d, c + R * 0.42, c - R * 0.42, R * 0.2, -spin * 1.4, (255, 255, 255, 220))
+    return tile.resize((size // 3, size // 3), Image.BILINEAR)
+
+
+def ai_frame(img, s, state, t, p):
+    """Versión modo IA de un cuadro ya dibujado (cualquier estilo: trabaja sobre la silueta de la
+    forma): halo vibrante que late y cambia de color, insignia ✦ que entra desde la derecha y,
+    mientras procesa, un destello que recorre la ventanita. `p` = avance de la entrada (0 a 1).
+    Agranda el lienzo igual a los dos lados, así la ventanita sigue centrada."""
+    g = geometry(s)
+    W, H = img.size
+    D = max(18, round(g["h"] * 0.78))
+    gap = max(6, round(g["h"] * 0.16))
+    ext = D + gap
+    W2 = W + 2 * ext
+    key = (W, H, g["w"], g["h"], g["r"], D)
+    base = _ai_cache.get(key)
+    if base is None:
+        body = Image.new("L", (W2, H), 0)
+        body.paste(_mask(W, H, [MARGIN, MARGIN, MARGIN + g["w"], MARGIN + g["h"]], g["r"]), (ext, 0))
+        halo = np.asarray(body.filter(ImageFilter.MaxFilter(13)).filter(ImageFilter.GaussianBlur(9)),
+                          np.float32) / 255 * 1.35
+        grad = np.asarray(_hgrad(W2, H, AI_COLORS), np.uint8)
+        base = (np.asarray(body, np.float32) / 255, halo, grad)
+        if len(_ai_cache) > 16:
+            _ai_cache.clear()
+        _ai_cache[key] = base
+    body, halo, grad = base
+    p = max(0.0, min(1.0, p))
+    pulse = 0.6 + 0.4 * math.sin(t * 7)
+    alpha = np.clip(halo * pulse * p * 255, 0, 255).astype(np.uint8)
+    canvas = Image.fromarray(np.dstack([np.roll(grad, int(t * 90) % W2, axis=1), alpha]), "RGBA")
+    canvas.alpha_composite(img, (ext, 0))
+    if state == "processing":
+        x0, x1 = ext + MARGIN, ext + MARGIN + g["w"]
+        bx = x0 + ((t * 0.9) % 1.4 - 0.2) * (x1 - x0)
+        xs = np.arange(W2, dtype=np.float32)
+        band = np.exp(-((xs - bx) / (g["h"] * 0.55)) ** 2)[None, :] * body * 110 * p
+        shine = np.zeros((H, W2, 4), np.uint8)
+        shine[..., :3] = 255
+        shine[..., 3] = np.clip(band, 0, 255).astype(np.uint8)
+        canvas.alpha_composite(Image.fromarray(shine, "RGBA"))
+    q = _ease_back(p) if p < 1 else 1.0
+    if q > 0.05:
+        tile = _ai_badge(D, t, state)
+        if q != 1.0:
+            n = max(2, round(tile.size[0] * q))
+            tile = tile.resize((n, n), Image.LANCZOS)
+        cx = ext + MARGIN + g["w"] + gap + D / 2 - (1 - p) * D * 0.7
+        cy = MARGIN + g["h"] / 2
+        _paste(canvas, tile, round(cx - tile.size[0] / 2), round(cy - tile.size[1] / 2))
+    return canvas
+
+
+def _paste(canvas, tile, x, y):
+    """alpha_composite que recorta lo que cae afuera del lienzo (en vez de fallar)."""
+    l, t = max(0, -x), max(0, -y)
+    r = min(tile.size[0], canvas.size[0] - x)
+    b = min(tile.size[1], canvas.size[1] - y)
+    if r > l and b > t:
+        canvas.alpha_composite(tile.crop((l, t, r, b)), (x + l, y + t))
+
+
 def render(s, state, levels, t):
     """Cuadro RGBA del overlay. `s` ya resuelto; state: "recording" o "processing"."""
     g = geometry(s)

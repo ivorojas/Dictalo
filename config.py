@@ -58,6 +58,7 @@ class Config:
     hotkey_display: str = "F9"
     open_hotkey: str = "ctrl+f1"   # abre Ajustes con el historial arriba (ver globalkey.OPTIONS)
     copy_hotkey: str = "alt+f1"    # copia el último dictado al portapapeles, sin abrir nada
+    ai_hotkey: str = "f10"         # mientras grabás: activa el modo IA en ese dictado (ver ai.py)
 
     # Ventanita flotante: estilo elegido (id de preset, "custom" o "mine:<nombre>"),
     # el personalizado en edición y los guardados por el usuario (ver looks.py)

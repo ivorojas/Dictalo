@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from PIL import ImageTk
 
+import ai
 import globalkey
 import history
 import remote
@@ -164,7 +165,7 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", pc_role="auto",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", ai_hotkey="f10", pc_role="auto",
         sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
@@ -220,6 +221,7 @@ class SettingsView(_Toast):
         self._header(root)
         self._historial(root)      # primero: casi siempre se abre para copiar el último dictado
         self._dictado(root)
+        self._modo_ia(root)
         self._ventanita(root)
         self._vocabulario(root)
         self._dos_pcs(root)
@@ -280,7 +282,8 @@ class SettingsView(_Toast):
         ui.label(b, "Atajo para dictar", F.body_sb).pack(anchor="w")
         ui.label(b, "Tocalo una vez para empezar y otra para terminar y pegar el texto.",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
-        ui.ChipGroup(b, HOTKEYS, self.ctx.config.hotkey, self._set_hotkey, height=34).pack(fill="x")
+        self.dict_keys = ui.ChipGroup(b, HOTKEYS, self.ctx.config.hotkey, self._set_hotkey, height=34)
+        self.dict_keys.pack(fill="x")
         ui.separator(b).pack(fill="x", pady=18)
         ui.label(b, "Atajo para abrir esta ventana", F.body_sb).pack(anchor="w")
         ui.label(b, "Desde cualquier app. Enter copia el último dictado y cierra; Esc cierra.",
@@ -310,6 +313,10 @@ class SettingsView(_Toast):
         self._saved()
 
     def _set_hotkey(self, value):
+        if value == f"<{getattr(self.ctx.config, 'ai_hotkey', '')}>":
+            self.dict_keys.set(self.ctx.config.hotkey)
+            self._toast(f"{value.strip('<>').upper()} ya es la tecla del modo IA", ok=False)
+            return
         self.ctx.config.hotkey = value
         self.ctx.config.hotkey_display = dict((v, t) for t, v in HOTKEYS)[value]
         self._saved()
@@ -345,6 +352,39 @@ class SettingsView(_Toast):
             chips.set(old)
             self._toast(f"{globalkey.label(key)} ya lo usa otra app, elegí otro", ok=False)
             return
+        self._saved()
+
+    # modo IA
+    def _modo_ia(self, p):
+        self._section(p, "Modo IA")
+        card = ui.Card(p)
+        card.pack(fill="x", pady=(0, 28))
+        b = card.body
+        ui.label(b, "Mientras dictás, apretá la tecla del modo IA: tu dictado pasa a ser un pedido y se "
+                    "pega lo que escribe la IA (en inglés, salvo que pidas otro idioma). Si tenías texto "
+                    "seleccionado, trabaja sobre ese texto.", F.small, ui.TEXT_2,
+                 wraplength=440).pack(anchor="w", pady=(0, 14))
+        ui.label(b, "Tecla del modo IA", F.body_sb).pack(anchor="w")
+        ui.label(b, "Solo se usa mientras grabás; el resto del tiempo esa tecla anda normal.",
+                 F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
+        self.ai_keys = ui.ChipGroup(b, globalkey.AI_OPTIONS, getattr(self.ctx.config, "ai_hotkey", "f10"),
+                                    self._set_ai_key, height=34)
+        self.ai_keys.pack(fill="x")
+        if ai.available():
+            text, color = f"✓ Listo · {ai.MODEL}", ui.SUCCESS
+        elif self.ctx.role_now() == "terminal":
+            text, color = "✓ Se procesa en la PC principal", ui.SUCCESS
+        else:
+            text, color = "Funciona con la PC principal (la del escritorio).", ui.TEXT_3
+        ui.label(b, text, F.tiny, color).pack(anchor="w", pady=(12, 0))
+
+    def _set_ai_key(self, key):
+        cfg = self.ctx.config
+        if key != "none" and cfg.hotkey == f"<{key}>":
+            self.ai_keys.set(cfg.ai_hotkey)
+            self._toast(f"{globalkey.label(key)} ya es tu atajo para dictar", ok=False)
+            return
+        cfg.ai_hotkey = key
         self._saved()
 
     def _set_sound(self, pack):
@@ -1080,6 +1120,12 @@ def selftest(root):
             ctx.updates.state, ctx.updates.progress = state, 0.42
             view._refresh_update()
     ctx.updates.state = "uptodate"
+    view._set_ai_key("f9")                    # no existe como opción: igual no puede romper nada
+    view._set_hotkey("<f10>")                 # la misma que el modo IA: tiene que rechazarlo
+    view._set_ai_key("f8")
+    if (ctx.config.hotkey, ctx.config.ai_hotkey) != ("<f9>", "f8"):
+        raise RuntimeError("el atajo de dictar y el del modo IA quedaron mal")
+    ctx.config.ai_hotkey = "f10"
     view._set_copy_hotkey("ctrl+f1")          # el mismo que abrir: tiene que rechazarlo
     view._set_copy_hotkey("shift+f1")
     if (ctx.config.open_hotkey, ctx.config.copy_hotkey) != ("ctrl+f1", "shift+f1"):

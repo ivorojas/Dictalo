@@ -98,12 +98,37 @@ def _build(pack):
             "wait": _note(415, 0.10, vol=0.16)}
 
 
-_sounds = _build("suave")
+def _sparkle(dur=0.35, vol=0.07):
+    """Brillo: parciales agudos que titilan y se apagan (la "chispa" del modo IA)."""
+    t = _t(dur)
+    w = np.zeros(len(t), dtype=np.float32)
+    for f, ph in ((2637, 0.0), (3136, 1.3), (3951, 2.1), (4699, 0.7)):
+        w += np.sin(2 * np.pi * f * t + ph) * (0.5 + 0.5 * np.sin(2 * np.pi * 14 * t + ph))
+    return w / 4 * _env(len(t), attack=0.01, decay=5.0) * vol
+
+
+def _mix(*layers):
+    n = max(len(x) for x in layers)
+    out = np.zeros(n, dtype=np.float32)
+    for x in layers:
+        out[:len(x)] += x
+    return out
+
+
+# Modo IA: iguales en todos los packs (se distinguen de propósito del resto); en "silencio", nada.
+_AI = {"ai_on": _mix(_seq(_note(523, 0.07, vol=0.15), _note(784, 0.07, vol=0.16), _note(1047, 0.07, vol=0.17),
+                          _note(1568, 0.22, vol=0.18)), _seq(_gap(0.12), _sparkle(0.4))),
+       "ai_done": _mix(_note(784, 0.45, vol=0.1), _note(988, 0.45, vol=0.09), _note(1175, 0.45, vol=0.09),
+                       _seq(_gap(0.05), _note(1568, 0.4, vol=0.12)), _seq(_gap(0.08), _sparkle(0.45)))}
+
+_sounds = dict(_build("suave"), **_AI)
 
 
 def set_pack(name):
     global _sounds
     _sounds = _build(name if name in dict(PACKS) else "suave")
+    if _sounds:
+        _sounds.update(_AI)
 
 
 def _play(key):
@@ -132,3 +157,5 @@ def stop():   _play("stop")
 def done():   _play("done")
 def error():  _play("error")
 def wait():   _play("wait")
+def ai_on():   _play("ai_on")
+def ai_done(): _play("ai_done")

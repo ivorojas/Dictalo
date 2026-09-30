@@ -106,6 +106,7 @@ _setup_stdio()
 import pystray
 from pynput import keyboard as kb
 
+import ai
 import globalkey
 import remote
 import updater
@@ -237,7 +238,9 @@ def main():
     # ("remote"). El texto se pega en la PC que recibió el F9 DE CIERRE: con Cruce, las teclas van
     # a la PC donde está el cursor, así que es donde estás apuntando, con cualquier combinación de
     # teclado y mouse. La ventanita se ve en las dos pantallas; los sonidos, donde estás.
-    _rec = {"id": 0, "away": False}   # id = ms de inicio del dictado (crece aunque la app se reinicie)
+    # id = ms de inicio del dictado (crece aunque la app se reinicie); ai/sel = modo IA de este
+    # dictado y el texto que estaba seleccionado al activarlo (ver ai.py y _on_ai_key)
+    _rec = {"id": 0, "away": False, "ai": False, "sel": ""}
 
     def _peer():
         return role == "main" and link is not None and link.connected
@@ -279,7 +282,8 @@ def main():
     def _show(state, sound=False):
         overlay.set_state(state)
         if _peer():   # "mine": el F9 vino de la otra PC (para decidir dónde se ve la ventanita)
-            remote.send({"t": "state", "s": state, "id": _rec["id"], "snd": sound, "mine": _rec["away"]})
+            remote.send({"t": "state", "s": state, "id": _rec["id"], "snd": sound, "mine": _rec["away"],
+                         "ai": _rec["ai"]})
 
     def _fail(msg=None):
         if _rec["away"] and _peer():
@@ -294,7 +298,7 @@ def main():
         while recorder.is_recording and _gen["n"] == g:
             if _peer():
                 remote.send({"t": "state", "s": "recording", "id": _rec["id"], "mine": _rec["away"],
-                             "b": [round(float(b), 2) for b in recorder.bands]})
+                             "ai": _rec["ai"], "b": [round(float(b), 2) for b in recorder.bands]})
             time.sleep(0.1)
 
     def on_toggle(origin="local"):
@@ -315,6 +319,7 @@ def main():
             return
 
         if recorder.is_recording:
+            _arm_ai(False)
             away = _rec["away"] = origin == "remote"   # el F9 de cierre llegó de la otra PC: ahí se pega
             end_hwnd = 0 if away else capture_foreground()
             set_rec_icon(False)
@@ -348,15 +353,30 @@ def main():
                         recorder.refresh()          # por si el mic quedó en mal estado
                         _fail("No se entendió nada del audio. Probá de nuevo.")
                         return
-                    text = cleaner.clean(raw)
+                    use_ai = _rec["ai"]
+                    if use_ai:
+                        # Modo IA: el dictado es el PEDIDO; se pega lo que escribe Gemini.
+                        t0 = time.perf_counter()
+                        try:
+                            text = ai.generate(raw, _rec["sel"])
+                        except RuntimeError as e:
+                            print(f"[ia] falló: {e}")
+                            history.add(raw)        # el pedido queda a mano
+                            _fail(f"{e} Tu pedido quedó en Ajustes → Historial.")
+                            return
+                        print(f"[ia] {ai.MODEL} respondió en {time.perf_counter() - t0:.2f}s "
+                              f"({'sobre el texto seleccionado' if _rec['sel'] else 'de cero'})")
+                    else:
+                        text = cleaner.clean(raw)
                     history.add(text)               # respaldo, por si no se pega en ningún lado
-                    if away and _peer() and remote.send({"t": "text", "text": text, "id": _rec["id"]}):
+                    if away and _peer() and remote.send({"t": "text", "text": text, "id": _rec["id"],
+                                                         "ai": use_ai}):
                         print(f"[ok] enviado a la otra PC: {text}")
                     elif away:
                         sounds.error()
                         _notify("No se pudo mandar el texto a la otra PC. Quedó en Ajustes → Historial.")
                     elif injector.inject(text, tgt):
-                        sounds.done()
+                        sounds.ai_done() if use_ai else sounds.done()
                         print(f"[ok] {text}")
                     else:
                         sounds.error()
@@ -378,6 +398,8 @@ def main():
                 return
             away = _rec["away"] = origin == "remote"
             _rec["id"] = int(time.time() * 1000)
+            _rec["ai"], _rec["sel"] = False, ""          # el modo IA vale para un dictado
+            overlay.set_ai(False)
             _target["hwnd"] = 0 if away else capture_foreground()
             try:
                 recorder.start()
@@ -394,6 +416,7 @@ def main():
                 sounds.start()
             _focus_start(not away)
             _show("recording", sound=away)
+            _arm_ai(True)
             threading.Thread(target=_stream_levels, args=(g,), daemon=True).start()
 
             def _check_mic():
@@ -406,9 +429,42 @@ def main():
             t.daemon = True
             t.start()
 
+    # Modo IA (ai.py): la tecla (F10 por defecto) se toma SOLO mientras se graba, así el resto del
+    # tiempo sigue andando normal en tus apps (F10 abre menús en muchas). Al apretarla se copia el
+    # texto seleccionado en la PC donde estás; Gemini corre siempre en la principal.
+    def _arm_ai(on):
+        key = config.ai_hotkey if on else "none"
+        if ai_key.set(key) is False:
+            print(f"[ia] la tecla {globalkey.label(key)} la tiene otra app")
+
+    def _on_ai_key():
+        if role == "terminal":
+            if _term["state"] != "recording" or _term["ai"]:
+                return
+            sel = injector.copy_selection()
+            if not remote.send({"t": "ai", "sel": sel, "id": _term["id"]}):
+                sounds.error()
+                _notify("No se pudo llegar a la PC principal para el modo IA.")
+                return
+            _term["ai"] = True
+        else:
+            if not recorder.is_recording or _rec["ai"]:
+                return
+            if not ai.available():
+                sounds.error()
+                _notify("El modo IA funciona con la PC principal (la del escritorio).")
+                return
+            sel = _rec["sel"] = injector.copy_selection()
+            _rec["ai"] = True
+        sounds.ai_on()
+        overlay.set_ai(True)
+        print(f"[ia] modo IA activado ({f'sobre {len(sel)} caracteres seleccionados' if sel else 'de cero'})")
+
+    ai_key = globalkey.GlobalHotkey(lambda: threading.Thread(target=_on_ai_key, daemon=True).start())
+
     # Terminal (esta PC no transcribe): F9 le pide el dictado a la principal y lo que vuelve
     # (estados, texto) llega por _on_remote.
-    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0, "id": 0, "mine": True}
+    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0, "id": 0, "mine": True, "ai": False}
 
     def _toggle_on_main():
         if not remote.send({"t": "toggle"}):
@@ -432,6 +488,13 @@ def main():
             _focus["mine"] = False
         elif role == "main" and kind == "toggle":
             _toggles.put("remote")
+        elif role == "main" and kind == "ai":           # modo IA activado desde la otra PC
+            if recorder.is_recording and not _rec["ai"] and ai.available():
+                sel = _rec["sel"] = str(data.get("sel") or "")
+                _rec["ai"] = True
+                overlay.set_ai(True)
+                print(f"[ia] modo IA activado desde la otra PC "
+                      f"({f'sobre {len(sel)} caracteres seleccionados' if sel else 'de cero'})")
         elif role == "terminal" and kind == "state":
             state, did = data.get("s"), data.get("id", 0)
             if state not in ("recording", "processing", "hidden") or did < _term["id"]:
@@ -441,6 +504,14 @@ def main():
                 sounds.start()
             if state == "recording" and did != _term["id"]:
                 _focus_start(bool(data.get("mine")))   # arranca en la PC donde se apretó F9
+                _term["ai"] = False
+                overlay.set_ai(False)
+                _arm_ai(True)                           # la tecla del modo IA, solo mientras graba
+            elif state != "recording" and _term["state"] == "recording":
+                _arm_ai(False)
+            if data.get("ai") and not _term["ai"]:     # activado en la principal
+                _term["ai"] = True
+                overlay.set_ai(True)
             if data.get("b"):
                 _term["bands"] = data["b"]
             _term["id"], _term["state"], _term["mine"] = did, state, bool(data.get("mine"))
@@ -449,6 +520,8 @@ def main():
         elif role == "terminal" and kind == "text":
             text = str(data.get("text", ""))
             if data.get("id", 0) >= _term["id"]:       # un texto que llega tarde no cierra un dictado nuevo
+                if _term["state"] == "recording":
+                    _arm_ai(False)
                 _term["state"] = "hidden"
                 overlay.set_state("hidden")
                 set_rec_icon(False)
@@ -456,7 +529,7 @@ def main():
                 return
             history.add(text)
             if injector.inject(text, capture_foreground()):   # en el campo donde estás AHORA
-                sounds.done()
+                sounds.ai_done() if data.get("ai") else sounds.done()
                 print(f"[ok] recibido de la PC principal: {text}")
             else:
                 sounds.error()
@@ -464,6 +537,8 @@ def main():
         elif role == "terminal" and kind == "error":
             if data.get("id", 0) < _term["id"]:
                 return
+            if _term["state"] == "recording":
+                _arm_ai(False)
             _term["state"] = "hidden"
             overlay.set_state("hidden")
             set_rec_icon(False)
@@ -582,6 +657,7 @@ def main():
     def _close_for_update():
         open_key.stop()
         copy_key.stop()
+        ai_key.stop()
         icon.stop()
 
     upd = None
@@ -616,6 +692,7 @@ def main():
         print("[salida] reinicio para aplicar el cambio de Dos PCs")
         open_key.stop()
         copy_key.stop()
+        ai_key.stop()
         ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_mutex["h"]))
         args = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
                                                                       os.path.abspath(sys.argv[0])]
@@ -666,6 +743,7 @@ def main():
         print("[salida] Salir desde el menú del ícono")
         open_key.stop()
         copy_key.stop()
+        ai_key.stop()
         icon.stop()
         overlay.stop()
 

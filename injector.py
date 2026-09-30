@@ -181,6 +181,35 @@ def _clipboard_set(text):
         user32.CloseClipboard()
 
 
+user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+_TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "mintty", "PuTTY", "VirtualConsoleClass"}
+
+
+def copy_selection(timeout=0.5):
+    """Texto seleccionado en la ventana en foco (para el modo IA): manda Ctrl+C con scan codes
+    y, si el portapapeles cambió, lo lee y lo deja como estaba. "" si no había selección.
+    En terminales NO se manda Ctrl+C (ahí corta el programa que está corriendo)."""
+    fg = user32.GetForegroundWindow()
+    if not fg or _is_ours(fg) or _class_name(fg) in _TERMINALS:
+        return ""
+    seq = user32.GetClipboardSequenceNumber()
+    old = _clipboard_get()
+    _send_one(_ki(VK_CONTROL)); time.sleep(0.02)
+    _send_one(_ki(0x43)); time.sleep(0.02)                     # C
+    _send_one(_ki(0x43, up=True)); time.sleep(0.02)
+    _send_one(_ki(VK_CONTROL, up=True))
+    end = time.time() + timeout
+    while time.time() < end and user32.GetClipboardSequenceNumber() == seq:
+        time.sleep(0.02)
+    if user32.GetClipboardSequenceNumber() == seq:
+        return ""                                               # no había nada seleccionado
+    time.sleep(0.03)
+    text = _clipboard_get() or ""
+    if old is not None:
+        _clipboard_set(old)
+    return text.strip()
+
+
 def _win_info(hwnd):
     title = ctypes.create_unicode_buffer(200)
     cls = ctypes.create_unicode_buffer(200)

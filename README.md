@@ -47,7 +47,11 @@ The overlay floats on top, is click-through and never steals focus, so the paste
 - 🎨 **Customizable overlay**: 12 ready-made styles (including an animated rainbow) or build and save your own
 - 🗣️ **Custom vocabulary**: names and terms you use often, so Whisper writes them right
 - 🕘 **Backup history** of your last 3 days of dictations, searchable, one click to copy (older ones are deleted automatically)
-- 🔒 **100% offline**: private by design, nothing is uploaded
+- ✨ **AI mode (optional)**: while dictating, press <kbd>F10</kbd> and your dictation becomes a *request*:
+  Google Gemini writes the text (a message, an email, a reply…) and that's what gets pasted, in English unless
+  you ask for another language. Select some text first and it edits that text instead. Only the dictations
+  where you press the key go to Gemini
+- 🔒 **Local by default**: normal dictation never leaves your PC
 - 🔔 **Clear feedback**: sound + notification if the mic captured nothing or a paste failed, instead of silently doing nothing
 - 💤 **Resilient to sleep/resume**: re-arms the hotkey and refreshes audio after your PC wakes up
 - 🔄 **Updates itself**: when a new version is published it downloads it in the background, verifies it
@@ -183,6 +187,10 @@ Dictado App is **Windows only**. It relies on native Windows APIs for text injec
 Everything runs on your machine. Audio is captured, transcribed locally, and discarded. The only network access
 Dictado App makes is a **one-time model download** on first run and an **update check** every few hours (it asks
 GitHub for the latest release; nothing about you or your dictations is sent). There is no telemetry and no account.
+
+**AI mode is the exception, and only when you turn it on**: in a dictation where you press the AI key, the
+transcribed request (and the text you had selected, if any) is sent to Google Gemini to write the result. Your
+Gemini API key is stored encrypted with Windows DPAPI in your user folder, never in the app's settings file.
 
 ## Credits & license
 

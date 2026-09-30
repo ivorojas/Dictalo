@@ -11,8 +11,12 @@ from ctypes import wintypes
 
 OPTIONS = [("Ctrl+F1", "ctrl+f1"), ("Alt+F1", "alt+f1"), ("Shift+F1", "shift+f1"),
            ("Ctrl+Shift+F1", "ctrl+shift+f1"), ("Ctrl+Alt+H", "ctrl+alt+h"), ("Ninguno", "none")]
+# Tecla del modo IA: sola (sin modificadores) porque se aprieta mientras grabás; se registra SOLO
+# durante el dictado, así el resto del tiempo F10/F8 siguen andando normal en tus apps.
+AI_OPTIONS = [("F10", "f10"), ("F8", "f8"), ("F11", "f11"), ("F7", "f7"), ("Ninguna", "none")]
 _KEYS = {"ctrl+f1": (0x2, 0x70), "alt+f1": (0x1, 0x70), "shift+f1": (0x4, 0x70),
-         "ctrl+shift+f1": (0x6, 0x70), "ctrl+alt+h": (0x3, 0x48)}   # (modificadores, tecla virtual)
+         "ctrl+shift+f1": (0x6, 0x70), "ctrl+alt+h": (0x3, 0x48),
+         "f7": (0, 0x76), "f8": (0, 0x77), "f10": (0, 0x79), "f11": (0, 0x7A)}   # (modificadores, tecla virtual)
 _MOD_NOREPEAT, _WM_HOTKEY, _WM_QUIT, _WM_USER = 0x4000, 0x0312, 0x0012, 0x0400
 
 _u32 = ctypes.WinDLL("user32")
@@ -27,7 +31,7 @@ _k32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 def label(key):
-    return dict((v, t) for t, v in OPTIONS).get(key, key)
+    return dict((v, t) for t, v in OPTIONS + AI_OPTIONS).get(key, key)
 
 
 class GlobalHotkey:

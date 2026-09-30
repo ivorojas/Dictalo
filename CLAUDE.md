@@ -195,7 +195,18 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   compilar pide Windows SDK + Vulkan SDK (instalación con admin).
 - **Primera descarga del modelo**: `_model_path` reintenta (WinError 1314 de symlinks de Hugging Face en
   Windows sin modo desarrollador). Antes, en una PC nueva, ese error hacía caer a CPU aunque hubiera GPU.
-- **No usa la nube ni IA** para el dictado normal. Cleanup Gemini existe pero está OFF y oculto.
+- **No usa la nube ni IA** para el dictado normal. Cleanup Gemini (cleaner.py) existe pero está OFF y oculto.
+- **MODO IA (v1.3.0, lo pidió el dueño)**: `ai.py`. Mientras grabás, la tecla `config.ai_hotkey` (F10; opciones
+  F10/F8/F11/F7, globalkey.AI_OPTIONS) activa el modo IA en ESE dictado: se copia el texto seleccionado
+  (`injector.copy_selection`: Ctrl+C con scan codes, detecta por GetClipboardSequenceNumber, restaura el
+  portapapeles; NO en terminales porque Ctrl+C corta procesos), y al cortar el dictado es el PEDIDO: Gemini
+  (`ai.MODEL` = gemini-3.8-flash, elegido por el dueño: "Flash, no Lite") escribe el texto y se pega eso.
+  Salida en inglés salvo que pida otro idioma. La tecla se registra (RegisterHotKey) SOLO mientras se graba
+  (`main._arm_ai`), porque F10 abre menús en muchas apps. Siempre corre en la principal: la terminal manda
+  {"t":"ai","sel":...} y recibe "ai" en los estados/texto. Visual: `looks.ai_frame` (halo que late, insignia
+  ✦ que entra desde la derecha, destello al procesar) sobre cualquier estilo, ~5 ms/cuadro. Sonidos
+  `sounds.ai_on`/`ai_done`. La clave de Gemini: cifrada con DPAPI en ~/.dictado/gemini.key (ai.save_key);
+  la dejó configurada el asistente en el escritorio; NUNCA en prefs.json ni en el repo.
 
 ## Estado actual (v1.2.0)
 Funciona end-to-end: dicta, transcribe, pega donde cortás, overlay con espectro, sonidos, splash, avisos si el

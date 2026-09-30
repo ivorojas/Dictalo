@@ -189,6 +189,7 @@ class Overlay:
         self.get_intensity = lambda: looks.DEFAULT_INTENSITY   # exageración visual 0-1
         self.get_visible = lambda: True        # ¿mostrarla en esta PC? (dos PCs: donde estás)
         self._state = "hidden"
+        self._ai = None                          # momento en que se activó el modo IA (o None)
         self._bars = []
         self._t0 = time.perf_counter()
         self._last_err = None
@@ -197,6 +198,15 @@ class Overlay:
 
     def set_state(self, state):
         self._state = state
+        if state == "hidden":
+            self._ai = None
+
+    def set_ai(self, on):
+        """Modo IA: la versión "súper" de la ventanita (looks.ai_frame), con su animación de entrada."""
+        if on and self._ai is None:
+            self._ai = time.perf_counter()
+        elif not on:
+            self._ai = None
 
     def stop(self):
         self.root.after(0, self.root.quit)
@@ -227,5 +237,8 @@ class Overlay:
         if len(self._bars) != n:
             self._bars = [0.0] * n
         self._bars = looks.follow(self._bars, target, s["speed"])
-        img = looks.render(s, self._state, self._bars, time.perf_counter() - self._t0)
+        now = time.perf_counter()
+        img = looks.render(s, self._state, self._bars, now - self._t0)
+        if self._ai is not None:
+            img = looks.ai_frame(img, s, self._state, now - self._t0, (now - self._ai) / looks.AI_IN_S)
         self._win.show(img, *_position(img.size, s["position"]))

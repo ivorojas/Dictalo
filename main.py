@@ -7,6 +7,7 @@ Corre en 2do plano (tray). Ajustes desde el ícono.
 import atexit
 import ctypes
 import faulthandler
+from ctypes import wintypes
 import os
 import queue
 import subprocess
@@ -243,15 +244,35 @@ def main():
 
     # La ventanita se muestra solo en la PC donde estás (y en el monitor del cursor, ver
     # overlay._work_area), y cambia en vivo si pasás de una a otra durante la grabación:
-    # Remote = el cursor está en la otra PC → acá no; Controlled = la otra PC te maneja esta →
-    # acá sí; cada una con su mouse (Local) → en la PC donde apretaste F9.
-    def _here(started_here):
+    # Remote = el cursor está en la otra PC → acá no; Controlled = la otra PC maneja esta → acá sí.
+    # Cada una con su mouse (Local en las dos, p. ej. al volver con el mouse de la notebook a la
+    # notebook): gana la PC cuyo cursor se movió último; al moverse, le avisa a la otra
+    # ({"t":"here"}) para que se esconda. Arranca en la PC donde se apretó F9.
+    _focus = {"mine": True, "pos": None, "sent": 0.0}
+
+    def _link_up():
+        return link is not None and link.connected
+
+    def _here():
         if role == "off":
             return True
         mode = remote.presence()[0]                  # lo empuja Cruce en cada cambio: instantáneo
         if mode == "Remote":
             return False
-        return mode == "Controlled" or started_here
+        pt = wintypes.POINT()
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+            pos = (pt.x, pt.y)
+            if _focus["pos"] is not None and pos != _focus["pos"]:
+                _focus["mine"] = True
+                now = time.monotonic()
+                if _link_up() and now - _focus["sent"] > 0.15:
+                    _focus["sent"] = now
+                    remote.send({"t": "here"})
+            _focus["pos"] = pos
+        return mode == "Controlled" or _focus["mine"]
+
+    def _focus_start(started_here):
+        _focus["mine"], _focus["pos"] = started_here, None
 
     # Cruce manda los mensajes chicos por un canal ordenado y los grandes (un texto largo) por
     # otro: entre ellos no hay orden. Cada mensaje lleva "id" para que la otra PC descarte lo viejo.
@@ -371,6 +392,7 @@ def main():
             g = _gen["n"]
             if not away:
                 sounds.start()
+            _focus_start(not away)
             _show("recording", sound=away)
             threading.Thread(target=_stream_levels, args=(g,), daemon=True).start()
 
@@ -406,7 +428,9 @@ def main():
 
     def _on_remote(data):
         kind = data.get("t")
-        if role == "main" and kind == "toggle":
+        if kind == "here":                           # el cursor se movió en la otra PC
+            _focus["mine"] = False
+        elif role == "main" and kind == "toggle":
             _toggles.put("remote")
         elif role == "terminal" and kind == "state":
             state, did = data.get("s"), data.get("id", 0)
@@ -415,6 +439,8 @@ def main():
             new = did != _term["id"] or _term["state"] != "recording"
             if state == "recording" and new and data.get("snd"):   # suena donde está el mouse
                 sounds.start()
+            if state == "recording" and did != _term["id"]:
+                _focus_start(bool(data.get("mine")))   # arranca en la PC donde se apretó F9
             if data.get("b"):
                 _term["bands"] = data["b"]
             _term["id"], _term["state"], _term["mine"] = did, state, bool(data.get("mine"))
@@ -447,9 +473,9 @@ def main():
 
     if role == "terminal":
         overlay.get_bands = lambda: _term["bands"]
-        overlay.get_visible = lambda: _here(_term["mine"])
+        overlay.get_visible = _here
     else:
-        overlay.get_visible = lambda: _here(not _rec["away"])
+        overlay.get_visible = _here
 
     # pynput llama al callback DENTRO del hook de teclado de Windows. Si ahí se hace
     # algo lento (abrir el mic de una interfaz USB puede tardar cientos de ms),

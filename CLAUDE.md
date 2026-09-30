@@ -97,8 +97,9 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   escritorio (auto) / En esta PC (off). `_role_watch` reinicia la app si Cruce se conecta/desconecta (1 min
   estable, sin dictar). Sonidos: donde estás.
   VENTANITA (v1.2.18): solo en la PC donde estás y en el MONITOR del cursor, en vivo mientras grabás
-  (overlay._work_area por cuadro + overlay.get_visible → main._here: Remote = no; Controlled = sí; Local =
-  donde se apretó F9). Dónde está el cursor: `remote.presence()` sale de la suscripción "_state" de la API
+  (overlay._work_area por cuadro + overlay.get_visible → main._here: Remote = no; Controlled = sí; Local en
+  las dos (cada una con su mouse, p. ej. al volver con el mouse de la notebook a la notebook) = la PC cuyo
+  cursor se movió último: al moverse manda {"t":"here"} y la otra se esconde; arranca donde se apretó F9). Dónde está el cursor: `remote.presence()` sale de la suscripción "_state" de la API
   de Cruce (push, instantáneo). OJO: Cruce 1.19 dejó de escribir el registro Presence; queda de respaldo. Error de la
   v1.2.16: la notebook quedaba en "off" hasta elegir a mano → por eso ahora es automático. Regla de F9
   en ambas: si Cruce dice Mode=Remote (esta PC maneja la otra), se ignora acá. Dónde está el cursor:

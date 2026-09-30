@@ -70,8 +70,33 @@ def _alive(pid):
     return bool(ok) and code.value == 259          # STILL_ACTIVE
 
 
+_live = {"state": None, "feed": None}   # último estado que empujó Cruce (suscripción "_state")
+
+
+def _on_state(data):
+    _live["state"] = data if isinstance(data.get("mode"), str) else None
+
+
 def presence():
-    """(modo, peer) de Cruce: "Local" | "Remote" | "Controlled", o (None, "") si no corre."""
+    """(modo, peer) de Cruce: "Local" | "Remote" | "Controlled", o (None, "") si no corre.
+    Sale del estado que Cruce empuja por su API en cada cambio (instantáneo); el registro
+    Presence queda de respaldo (Cruce 1.19 dejó de escribirlo). peer = "" si la otra PC no
+    está conectada."""
+    if _live["feed"] is None:
+        _live["feed"] = Link(_on_state, app="_state", on_drop=lambda: _live.update(state=None),
+                             quiet=True)
+        for _ in range(20):                    # la 1ra vez espera el estado inicial (~ms)
+            if _live["state"] is not None or not _live["feed"].connected and _ > 5:
+                break
+            time.sleep(0.01)
+    st = _live["state"]
+    if st is not None:
+        return st["mode"], (st.get("peer") or "") if st.get("connected") else ""
+    return _registry_presence()
+
+
+def _registry_presence():
+    """Respaldo si la API no responde: el registro Presence de Cruce (≤1.18)."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Cruce\Presence") as k:
             mode = winreg.QueryValueEx(k, "Mode")[0]
@@ -109,20 +134,21 @@ class Link:
 
     RETRY_S = 3
 
-    def __init__(self, on_message):
-        self.on_message = on_message
+    def __init__(self, on_message, app=APP, on_drop=None, quiet=False):
+        self.on_message, self.app, self.on_drop, self.quiet = on_message, app, on_drop, quiet
         self.connected = False
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        logged = False
+        logged = self.quiet
         while True:
             try:
                 with open(PIPE, "r+b", buffering=0) as f:
-                    f.write((json.dumps({"cmd": "subscribe", "app": APP}) + "\n").encode("utf-8"))
+                    f.write((json.dumps({"cmd": "subscribe", "app": self.app}) + "\n").encode("utf-8"))
                     self.connected = True
-                    print("[cruce] conectado")
-                    logged = False
+                    if not self.quiet:
+                        print("[cruce] conectado")
+                    logged = self.quiet
                     reader = io.BufferedReader(f, 65536)   # sin buffer, readline lee de a 1 byte
                     for line in iter(reader.readline, b""):
                         try:
@@ -138,7 +164,9 @@ class Link:
                 if not logged:
                     print(f"[cruce] sin conexión con Cruce ({e.__class__.__name__}); reintento solo")
                     logged = True
-            if self.connected:
+            if self.connected and not self.quiet:
                 print("[cruce] desconectado")
             self.connected = False
+            if self.on_drop:
+                self.on_drop()
             time.sleep(self.RETRY_S)

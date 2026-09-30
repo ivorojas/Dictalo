@@ -142,10 +142,37 @@ class LayeredWindow:
         _g32.DeleteDC(self._dc)
 
 
-def _position(size, where):
-    """Centrado en el área de trabajo (sin la barra de tareas), abajo o arriba."""
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+_u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+_u32.MonitorFromPoint.restype = wintypes.HMONITOR
+_u32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+_u32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
+
+
+def _work_area(pt=None):
+    """Área de trabajo (sin la barra de tareas) del monitor donde está el cursor (o `pt`): la
+    ventanita va al monitor que estás mirando y se pasa sola si movés el mouse a otro."""
+    if pt is None:
+        pt = wintypes.POINT()
+        if not _u32.GetCursorPos(ctypes.byref(pt)):
+            pt = None
+    if pt is not None:
+        mon = _u32.MonitorFromPoint(pt, 2)          # MONITOR_DEFAULTTONEAREST
+        mi = _MONITORINFO(cbSize=ctypes.sizeof(_MONITORINFO))
+        if mon and _u32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+            return mi.rcWork
     wa = wintypes.RECT()
     _u32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(wa), 0)
+    return wa
+
+
+def _position(size, where, pt=None):
+    """Centrado en el área de trabajo del monitor del cursor, abajo o arriba."""
+    wa = _work_area(pt)
     W, H = size
     x = (wa.left + wa.right - W) // 2
     if where == "top":
@@ -160,6 +187,7 @@ class Overlay:
         self.get_bands = None                   # callable → bandas del micrófono (0-1)
         self.get_style = lambda: looks.resolve({})
         self.get_intensity = lambda: looks.DEFAULT_INTENSITY   # exageración visual 0-1
+        self.get_visible = lambda: True        # ¿mostrarla en esta PC? (dos PCs: donde estás)
         self._state = "hidden"
         self._bars = []
         self._t0 = time.perf_counter()
@@ -178,7 +206,7 @@ class Overlay:
 
     def _tick(self):
         try:
-            if self._state in ("recording", "processing"):
+            if self._state in ("recording", "processing") and self.get_visible():
                 self._frame()
             elif self._win.visible:
                 self._win.hide()

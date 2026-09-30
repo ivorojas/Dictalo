@@ -241,12 +241,24 @@ def main():
     def _peer():
         return role == "main" and link is not None and link.connected
 
+    # La ventanita se muestra solo en la PC donde estás (y en el monitor del cursor, ver
+    # overlay._work_area), y cambia en vivo si pasás de una a otra durante la grabación:
+    # Remote = el cursor está en la otra PC → acá no; Controlled = la otra PC te maneja esta →
+    # acá sí; cada una con su mouse (Local) → en la PC donde apretaste F9.
+    def _here(started_here):
+        if role == "off":
+            return True
+        mode = remote.presence()[0]                  # lo empuja Cruce en cada cambio: instantáneo
+        if mode == "Remote":
+            return False
+        return mode == "Controlled" or started_here
+
     # Cruce manda los mensajes chicos por un canal ordenado y los grandes (un texto largo) por
     # otro: entre ellos no hay orden. Cada mensaje lleva "id" para que la otra PC descarte lo viejo.
     def _show(state, sound=False):
         overlay.set_state(state)
-        if _peer():
-            remote.send({"t": "state", "s": state, "id": _rec["id"], "snd": sound})
+        if _peer():   # "mine": el F9 vino de la otra PC (para decidir dónde se ve la ventanita)
+            remote.send({"t": "state", "s": state, "id": _rec["id"], "snd": sound, "mine": _rec["away"]})
 
     def _fail(msg=None):
         if _rec["away"] and _peer():
@@ -260,7 +272,7 @@ def main():
         """Mientras graba, le manda el espectro a la otra PC (~10 por segundo) para su ventanita."""
         while recorder.is_recording and _gen["n"] == g:
             if _peer():
-                remote.send({"t": "state", "s": "recording", "id": _rec["id"],
+                remote.send({"t": "state", "s": "recording", "id": _rec["id"], "mine": _rec["away"],
                              "b": [round(float(b), 2) for b in recorder.bands]})
             time.sleep(0.1)
 
@@ -374,7 +386,7 @@ def main():
 
     # Terminal (esta PC no transcribe): F9 le pide el dictado a la principal y lo que vuelve
     # (estados, texto) llega por _on_remote.
-    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0, "id": 0}
+    _term = {"bands": [0.0] * NBANDS, "state": "hidden", "asked": 0.0, "id": 0, "mine": True}
 
     def _toggle_on_main():
         if not remote.send({"t": "toggle"}):
@@ -405,7 +417,7 @@ def main():
                 sounds.start()
             if data.get("b"):
                 _term["bands"] = data["b"]
-            _term["id"], _term["state"] = did, state
+            _term["id"], _term["state"], _term["mine"] = did, state, bool(data.get("mine"))
             set_rec_icon(state == "recording")
             overlay.set_state(state)
         elif role == "terminal" and kind == "text":
@@ -435,6 +447,9 @@ def main():
 
     if role == "terminal":
         overlay.get_bands = lambda: _term["bands"]
+        overlay.get_visible = lambda: _here(_term["mine"])
+    else:
+        overlay.get_visible = lambda: _here(not _rec["away"])
 
     # pynput llama al callback DENTRO del hook de teclado de Windows. Si ahí se hace
     # algo lento (abrir el mic de una interfaz USB puede tardar cientos de ms),

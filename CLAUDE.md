@@ -24,6 +24,11 @@ siempre en 2do plano (ícono en la barra), arranca con Windows.
   `assets\capture_ui.py` (capturas reales de Ajustes/Historial con datos de ejemplo).
 - **Versión:** está en `brand.py` (`__version__`) y en `installer.iss` (`AppVersion`): mantenerlas iguales.
 - Cerrar la app: ícono en la barra → Salir.
+- ⚠️ **ABRIR LA APP SIEMPRE VÍA EXPLORER** después de instalar/probar: `explorer.exe "%LOCALAPPDATA%\Programs\Dictado App\DictadoApp.exe"`.
+  Si se abre con `Start-Process` desde la consola de Claude, queda como descendiente de claude.exe y cuando
+  Claude se reinicia o se actualiza (pasa seguido) MATA ese árbol de procesos → la app "se cierra sola" sin
+  dejar rastro en el log. Confirmado 2 veces (cierres a las 16:07 y 01:07 = reinicios de Claude). En la
+  notebook no pasa (la abren Windows o el actualizador).
 
 > ⚠️ **El venv propio vive en `.venv`** (tiene faster-whisper, CUDA libs, pyinstaller). Está gitignoreado.
 > Si se borra/corrompe, recrearlo: `py -3.14 -m venv .venv && .venv\Scripts\python.exe -m pip install -r requirements.txt`

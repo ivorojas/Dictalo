@@ -167,7 +167,7 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", ai_hotkey="f10", pc_role="auto",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", ai_hotkey="f10", ai_model="gemini-3.8-flash", pc_role="auto",
         sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
@@ -363,10 +363,10 @@ class SettingsView(_Toast):
         card = ui.Card(p)
         card.pack(fill="x", pady=(0, 28))
         b = card.body
-        ui.label(b, "Apretá la tecla del modo IA para dictar directo con IA (o mientras dictás, para "
-                    "pasar ese dictado a IA): tu dictado pasa a ser un pedido y se pega lo que escribe la "
-                    "IA, en inglés salvo que pidas otro idioma. Si tenías texto seleccionado, trabaja "
-                    "sobre ese texto. Otra vez la tecla (o F9) corta.", F.small, ui.TEXT_2,
+        ui.label(b, "Apretá la tecla del modo IA para dictar directo con IA; si ya estás dictando, "
+                    "esa tecla corta y lo procesa con IA. Tu dictado pasa a ser un pedido y se pega lo "
+                    "que escribe la IA, en inglés salvo que pidas otro idioma. Si tenías texto "
+                    "seleccionado, trabaja sobre ese texto.", F.small, ui.TEXT_2,
                  wraplength=440).pack(anchor="w", pady=(0, 14))
         ui.label(b, "Tecla del modo IA", F.body_sb).pack(anchor="w")
         ui.label(b, "Queda reservada para Dictado App (tus otras apps no la reciben).",
@@ -375,12 +375,25 @@ class SettingsView(_Toast):
                                     self._set_ai_key, height=34)
         self.ai_keys.pack(fill="x")
         if ai.available():
-            text, color = f"✓ Listo · {ai.MODEL}", ui.SUCCESS
+            ui.label(b, "Modelo", F.body_sb).pack(anchor="w", pady=(18, 0))
+            ui.label(b, "Si uno anda lento o deja de existir, probá otro.",
+                     F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
+            self.ai_models = ui.ChipGroup(b, ai.MODELS, self._ai_model(), self._set_ai_model, height=34)
+            self.ai_models.pack(fill="x")
+            text, color = "✓ Listo", ui.SUCCESS
         elif self.ctx.role_now() == "terminal":
             text, color = "✓ Se procesa en la PC principal", ui.SUCCESS
         else:
             text, color = "Funciona con la PC principal (la del escritorio).", ui.TEXT_3
         ui.label(b, text, F.tiny, color).pack(anchor="w", pady=(12, 0))
+
+    def _ai_model(self):
+        model = getattr(self.ctx.config, "ai_model", ai.MODEL)
+        return model if any(m == model for _, m in ai.MODELS) else ai.MODEL
+
+    def _set_ai_model(self, model):
+        self.ctx.config.ai_model = model
+        self._saved()
 
     def _set_ai_key(self, key):
         cfg = self.ctx.config

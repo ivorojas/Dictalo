@@ -218,6 +218,11 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   `sounds.ai_on`/`ai_done` (v1.3.2): notas "de cristal" con coro, filtro de agudos, brillo de aire y
   reverberación por convolución; el dueño dijo que los primeros sonaban "baratos". La clave de Gemini: cifrada con DPAPI en ~/.dictado/gemini.key (ai.save_key);
   la dejó configurada el asistente en el escritorio; NUNCA en prefs.json ni en el repo.
+  v1.3.3: grabando, la tecla IA CORTA y procesa con IA (antes lo pasaba a IA y seguía grabando: el dueño
+  cortaba con F8 y se sentía "distinto"). Modelo elegible en Ajustes → Modo IA (`config.ai_model`,
+  `ai.MODELS`; solo en la PC con la clave). Si Whisper devuelve solo un sonido ("Music.", "Cough.",
+  `transcriber.is_noise`) o el pedido es de una palabra sin selección, NO se manda a Gemini (antes "Music."
+  generó un párrafo sobre música). Rayas (— –) prohibidas: regla en el prompt + `ai._no_dashes`.
 
 ## Estado actual (v1.2.0)
 Funciona end-to-end: dicta, transcribe, pega donde cortás, overlay con espectro, sonidos, splash, avisos si el

@@ -7,13 +7,19 @@ La clave de Gemini se guarda cifrada con DPAPI (solo tu usuario de Windows la pu
 """
 import ctypes
 import json
+import re
 import urllib.error
 import urllib.request
 from ctypes import wintypes
 
 from config import APP_DIR
 
-MODEL = "gemini-3.8-flash"     # Flash (no Lite): medido ~2-4 s por pedido, buen texto en en/es
+MODEL = "gemini-3.8-flash"     # por defecto. Flash (no Lite): medido ~2-4 s por pedido, buen texto en en/es
+# Elegibles en Ajustes (config.ai_model). Si uno deja de existir en la API, se avisa al usarlo.
+MODELS = [("3.8 Flash", "gemini-3.8-flash"), ("3.5 Flash", "gemini-3.5-flash"),
+          ("3.5 Flash Lite", "gemini-3.5-flash-lite"), ("3.1 Flash Lite", "gemini-3.1-flash-lite"),
+          ("2.5 Flash", "gemini-2.5-flash"),
+          ("2.5 Flash Lite", "gemini-2.5-flash-lite")]
 KEY_PATH = APP_DIR / "gemini.key"
 SYSTEM = (
     "You write text that will be pasted directly where the user is typing (a chat, an email, a "
@@ -21,7 +27,17 @@ SYSTEM = (
     "explanations, no markdown unless the user asks for it. Write in English unless the user "
     "explicitly asks for another language, even if they dictate in Spanish. If SELECTED TEXT is "
     "given, apply the user's request to it and return the complete revised text. Keep names, facts "
-    "and intent; don't invent details or leave placeholders unless unavoidable.")
+    "and intent; don't invent details or leave placeholders unless unavoidable. Never use em dashes "
+    "or en dashes; use commas, periods or parentheses instead.")
+_DASH = re.compile(r"\s*[—–]\s*")       # raya y semiraya: el dueño no las quiere nunca
+
+
+_RANGE = re.compile(r"(\d)\s*[—–]\s*(\d)")
+
+
+def _no_dashes(text):
+    """Por si el modelo igual las pone: "a—b" / "a — b" → "a, b"; entre números ("3–5") → "3-5"."""
+    return _DASH.sub(", ", _RANGE.sub(r"\1-\2", text)).replace(" ,", ",")
 
 
 class _BLOB(ctypes.Structure):
@@ -65,8 +81,9 @@ def available():
     return KEY_PATH.exists()
 
 
-def generate(instruction, selected=None, timeout=45):
+def generate(instruction, selected=None, model=None, timeout=45):
     """Texto final para pegar. Lanza RuntimeError con un mensaje para el usuario si falla."""
+    model = model or MODEL
     key = load_key()
     if not key:
         raise RuntimeError("El modo IA no está configurado en esta PC.")
@@ -76,7 +93,7 @@ def generate(instruction, selected=None, timeout=45):
     body = {"systemInstruction": {"parts": [{"text": SYSTEM}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}]}
     req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         data=json.dumps(body).encode("utf-8"),
         headers={"x-goog-api-key": key, "Content-Type": "application/json"})
     try:
@@ -85,6 +102,8 @@ def generate(instruction, selected=None, timeout=45):
         parts = data["candidates"][0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts).strip()
     except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise RuntimeError(f"El modelo {model} ya no está disponible: elegí otro en Ajustes.") from e
         raise RuntimeError(f"La IA respondió con un error ({e.code}).") from e
     except (urllib.error.URLError, TimeoutError) as e:
         raise RuntimeError("No se pudo llegar a la IA (¿sin internet?).") from e
@@ -92,4 +111,4 @@ def generate(instruction, selected=None, timeout=45):
         raise RuntimeError("La IA no devolvió texto.") from e
     if not text:
         raise RuntimeError("La IA no devolvió texto.")
-    return text
+    return _no_dashes(text)

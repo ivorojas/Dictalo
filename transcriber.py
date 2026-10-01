@@ -37,6 +37,20 @@ _HALLU_END = re.compile(
 )
 
 
+# Con ruido o silencio (no llegaste a hablar), Whisper inventa una palabra suelta que describe el
+# sonido: "Music.", "Cough.", "[Applause]"... Si el dictado ENTERO es eso, no es un dictado.
+_NOISE_WORDS = {"music", "cough", "coughing", "applause", "laughter", "laughing", "silence", "sigh",
+                "sighs", "breathing", "noise", "static", "beep", "beeping", "bell", "chime", "click",
+                "clicking", "typing", "wind", "música", "tos", "aplausos", "risas", "silencio",
+                "ruido", "suspiro"}
+
+
+def is_noise(text: str) -> bool:
+    """True si la transcripción es solo un "sonido" inventado por Whisper (Music, Cough, ♪...)."""
+    t = re.sub(r"[\[\]()*♪♫.,!¡?¿\s-]+", " ", text).strip().lower()
+    return not t or t in _NOISE_WORDS
+
+
 def _strip_hallucinations(text: str) -> str:
     """Recorta del final los créditos de subtitulado que Whisper alucina sobre el
     silencio. Itera por si quedan varios apilados."""

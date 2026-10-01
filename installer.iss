@@ -1,6 +1,6 @@
 ; Instalador de Dictado App (Inno Setup 6)
 #define AppName "Dictado App"
-#define AppVersion "1.3.2"
+#define AppVersion "1.3.3"
 #define AppExe "DictadoApp.exe"
 
 [Setup]

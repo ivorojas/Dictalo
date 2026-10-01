@@ -117,7 +117,7 @@ import ui
 from brand import APP_NAME, __version__, make_tray_icon
 from config import Config
 from recorder import NBANDS, Recorder
-from transcriber import Transcriber
+from transcriber import Transcriber, is_noise
 from cleaner import Cleaner
 from injector import Injector, capture_foreground, copy_selection
 from overlay import Overlay
@@ -306,14 +306,15 @@ def main():
     # Todo lo que ves y oís va PRIMERO (ventanita y sonido al instante); el micrófono abre después
     # (tarda ~10 ms, antes de que empieces a hablar) y el texto seleccionado se copia en 2do plano
     # (puede tardar ~1 s esperando al portapapeles): al cortar, work() espera esa copia.
-    def _enable_ai(origin):
+    def _enable_ai(origin, sound=True):
         """Modo IA en el dictado en curso. Local: copia acá la selección; remoto: la manda la
         otra PC después con {"t":"sel"}."""
         ev = threading.Event()
         _rec["ai"], _rec["sel"], _rec["sel_ready"] = True, "", ev
         overlay.set_ai(True)
         if origin == "local":
-            sounds.ai_on()
+            if sound:
+                sounds.ai_on()
 
             def copy():
                 sel = ""
@@ -353,8 +354,7 @@ def main():
             return
 
         if recorder.is_recording and want_ai and not _rec["ai"]:
-            _enable_ai(origin)                  # F8 grabando: este dictado pasa a modo IA
-            return
+            _enable_ai(origin, sound=False)     # F8 grabando: corta YA y lo procesa con IA
 
         if recorder.is_recording:
             away = _rec["away"] = origin == "remote"   # la tecla de cierre llegó de la otra PC: ahí se pega
@@ -390,20 +390,30 @@ def main():
                         recorder.refresh()          # por si el mic quedó en mal estado
                         _fail("No se entendió nada del audio. Probá de nuevo.")
                         return
+                    if is_noise(raw):
+                        # no llegaste a hablar: Whisper inventó "Music." / "Cough." con el ruido
+                        print("[stt] solo ruido (palabra inventada por Whisper): no se pega nada")
+                        _fail("No se entendió nada del audio. Probá de nuevo.")
+                        return
                     use_ai = _rec["ai"]
                     if use_ai:
                         # Modo IA: el dictado es el PEDIDO; se pega lo que escribe Gemini.
                         if _rec["sel_ready"] is not None:
                             _rec["sel_ready"].wait(1.5)     # la copia de la selección (2do plano)
+                        if not _rec["sel"] and len(raw.split()) < 2:
+                            print("[ia] pedido de una sola palabra y sin texto seleccionado: no se manda")
+                            history.add(raw)
+                            _fail("El pedido para la IA fue muy corto. Probá de nuevo.")
+                            return
                         t0 = time.perf_counter()
                         try:
-                            text = ai.generate(raw, _rec["sel"])
+                            text = ai.generate(raw, _rec["sel"], config.ai_model)
                         except RuntimeError as e:
                             print(f"[ia] falló: {e}")
                             history.add(raw)        # el pedido queda a mano
                             _fail(f"{e} Tu pedido quedó en Ajustes → Historial.")
                             return
-                        print(f"[ia] {ai.MODEL} respondió en {time.perf_counter() - t0:.2f}s "
+                        print(f"[ia] {config.ai_model} respondió en {time.perf_counter() - t0:.2f}s "
                               f"({'sobre el texto seleccionado' if _rec['sel'] else 'de cero'})")
                     else:
                         text = cleaner.clean(raw)
@@ -502,10 +512,9 @@ def main():
                     sounds.error()
                     _notify("La PC principal no respondió. ¿Tiene Dictado App abierta como Principal?")
             threading.Timer(3.0, _no_answer).start()
-        elif enabling:
+        elif enabling:                          # F8 grabando: la principal corta y lo procesa con IA
             _term["ai"] = True
             overlay.set_ai(True)
-            sounds.ai_on()
         if enabling:                            # la selección se copia acá y viaja aparte
             threading.Thread(target=lambda: remote.send({"t": "sel", "sel": copy_selection()}),
                              daemon=True).start()

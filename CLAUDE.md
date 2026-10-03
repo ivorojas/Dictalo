@@ -19,6 +19,10 @@ siempre en 2do plano (ícono en la barra), arranca con Windows.
 - **Autotest de la interfaz del .exe:** `dist\DictadoApp\DictadoApp.exe --selftest-ui` → escribe
   `[selftest] interfaz OK` en `%TEMP%\dictado-selftest.log` (arma Ajustes/Historial sin mostrarlos; no toca datos).
 - **Instalador:** `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss` → `Output\DictadoApp-Setup.exe`
+- **Parche del release (v1.3.5+):** después de compilar, `.venv\Scripts\python.exe tools\make_patch.py` (baja
+  el manifiesto del último release con gh) → `Output\DictadoApp-manifest.json` + `Output\DictadoApp-patch.zip`.
+  SUBIR LOS TRES al release (`gh release create vX Output\DictadoApp-Setup.exe Output\DictadoApp-manifest.json
+  Output\DictadoApp-patch.zip`). Sin el manifiesto, el release siguiente no puede tener parche.
 - **Actualizar la instalada sin reinstalar:** cerrar la app y `cp -rf dist/DictadoApp/* "%LOCALAPPDATA%\Programs\Dictado App\"`
 - **Íconos / imágenes del README:** `assets\render_icon.py` (icono.ico + icon.png), `assets\render.py` (overlay),
   `assets\capture_ui.py` (capturas reales de Ajustes/Historial con datos de ejemplo).
@@ -56,14 +60,19 @@ globalkey.py   atajo global para abrir Ajustes (Ctrl+F1 por defecto, config.open
                su propio hilo (no hook): consume la combinación y devuelve False si otra app ya la tiene.
                La misma tecla abre y cierra (si está abierta, aunque sea detrás de otra ventana, la cierra).
                En Ajustes, Enter copia el último dictado, cierra y devuelve el foco a donde estabas; Esc cierra.
-               Segundo atajo global (v1.2.13): `config.copy_hotkey`, Alt+F1 por defecto = copiar el último
-               dictado sin abrir nada (`main.copy_last`, suena "listo"/"error"). El portapapeles SOLO cambia
-               al apretarlo. Ajustes no deja poner el mismo atajo en los dos. Prefs viejos con
+               Segundo atajo global (v1.2.13): `config.copy_hotkey`, Alt+F1 por defecto. Desde v1.3.5 PEGA el
+               último dictado donde estás (`main.paste_last`: `injector.wait_modifiers` espera que sueltes
+               Alt y manda vkE8 para que la app no active su menú; pega y lo deja en el portapapeles). El
+               menú del ícono solo copia (`copy_last`). Ajustes no deja poner el mismo atajo en los dos. Prefs viejos con
                open_hotkey=alt+f1 y sin copy_hotkey → open pasa a ctrl+f1 (config._load).
-updater.py     auto-actualización (solo en el .exe): cada 6 h consulta el último release de GitHub; si es
-               más nuevo baja DictadoApp-Setup.exe a ~/.dictado/update, verifica sha256 (el "digest" de la API)
-               y, con 2 min sin dictar, suelta el mutex, lanza el instalador /VERYSILENT vía cmd (que al
-               terminar vuelve a abrir la app, salga bien o no) y se cierra. Al volver avisa "Se actualizó".
+updater.py     auto-actualización (solo en el .exe): cada 10 min consulta el último release de GitHub. v1.3.5:
+               si el release trae DictadoApp-patch.zip "from" = esta versión, baja SOLO lo que cambió (~17 MB:
+               DictadoApp.exe + base_library.zip; PyInstaller copia igual el resto), verifica sha256 y, con 30 s
+               sin dictar, muestra la tarjeta (splash.Splash) "Se actualiza a la X en 5 s" (si dictás en ese
+               rato, espera), lanza ~/.dictado/update/apply.cmd (espera a que el proceso muera, copia guardando
+               respaldo, si algo falla vuelve atrás, actualiza DisplayVersion y reabre la app) y se cierra.
+               Probado: copia y vuelta atrás. Si no hay parche para tu versión o ya falló una vez (pending.txt
+               = esa versión), instalador completo /VERYSILENT (~1-2 min: descomprimir 2.2 GB). Al volver avisa.
                => PUBLICAR UN RELEASE = ACTUALIZAR TODAS LAS PCs (escritorio y notebook). No publicar nada roto.
 history.py     dictados con fecha en ~/.dictado/history.json; se borran solos a los 3 días (RETENTION_DAYS).
 sounds.py      sonidos sintetizados (numpy+sounddevice) en packs: Suave, Burbuja, Digital, Campana, Silencio.

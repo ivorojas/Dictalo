@@ -132,6 +132,23 @@ def _send_ctrl_v():
     _send_one(_ki(VK_CONTROL, up=True))
 
 
+_MODS = (0x10, 0x11, 0x12, 0x5B, 0x5C)    # Shift, Ctrl, Alt, Win izq/der
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
+
+
+def wait_modifiers(timeout=2.0):
+    """Para pegar desde un atajo (Alt+F1): espera a que sueltes Alt/Ctrl/Shift/Win, si no el
+    Ctrl+V llegaría como Ctrl+Alt+V. Si Alt está apretado, antes manda una tecla "muda" (vkE8,
+    sin uso en Windows) para que al soltar Alt la app no active su barra de menú."""
+    if user32.GetAsyncKeyState(VK_MENU) & 0x8000:
+        _send_one(_ki(0xE8)); _send_one(_ki(0xE8, up=True))
+    end = time.monotonic() + timeout
+    while time.monotonic() < end and any(user32.GetAsyncKeyState(k) & 0x8000 for k in _MODS):
+        time.sleep(0.01)
+    time.sleep(0.03)
+
+
 def _open_clipboard():
     """OpenClipboard falla si otra app (historial de Windows, gestores de
     portapapeles, el navegador) lo tiene abierto en ese instante: reintentamos."""
@@ -280,7 +297,8 @@ def _focus_window(hwnd):
 
 
 class Injector:
-    def inject(self, text: str, target_hwnd=0):
+    def inject(self, text: str, target_hwnd=0, keep=False):
+        """`keep`: el texto queda en el portapapeles (si no, vuelve lo que tenías copiado)."""
         if not text:
             return False
         # target_hwnd = la ventana donde estabas AL CORTAR (F9). Normalmente ya tiene
@@ -306,7 +324,7 @@ class Injector:
         # Restaurar el clipboard en 2do plano: NO bloquea el sonido/overlay de fin.
         # 1s de margen: algunas apps (Electron/navegador cargado) leen el pegado
         # tarde y, si restaurábamos antes, pegaban lo que tenías copiado.
-        if old is not None:
+        if old is not None and not keep:
             def _restore():
                 time.sleep(1.0)
                 _clipboard_set(old)

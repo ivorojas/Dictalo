@@ -7,6 +7,7 @@ Corre en 2do plano (tray). Ajustes desde el ícono.
 import atexit
 import ctypes
 import faulthandler
+import math
 from ctypes import wintypes
 import os
 import queue
@@ -119,7 +120,7 @@ from config import Config
 from recorder import NBANDS, Recorder
 from transcriber import Transcriber, is_noise
 from cleaner import Cleaner
-from injector import Injector, capture_foreground, copy_selection
+from injector import Injector, capture_foreground, copy_selection, wait_modifiers
 from overlay import Overlay
 from splash import Splash
 from settings import open_settings, toggle_settings
@@ -664,14 +665,13 @@ def main():
         return _arm_global(open_key, key, "abrir Ajustes")
 
     def _set_copy_hotkey(key):
-        return _arm_global(copy_key, key, "copiar el último dictado")
+        return _arm_global(copy_key, key, "pegar el último dictado")
 
     def _set_ai_hotkey(key):
         return _arm_global(ai_key, key, "dictar con IA")
 
     def copy_last(*_):
-        """Atajo (Alt+F1) o menú: el último dictado al portapapeles, sin abrir nada. Solo
-        cuando lo pedís: si no, el portapapeles queda con lo que hayas copiado vos."""
+        """Menú del ícono: el último dictado al portapapeles, sin abrir nada."""
         items = history.get()
         if not items:
             sounds.error()
@@ -685,9 +685,44 @@ def main():
             sounds.error()
             print("[copiar] no pude usar el portapapeles")
 
+    def paste_last():
+        """Atajo (Alt+F1): pega el último dictado donde estás y lo deja también en el portapapeles."""
+        items = history.get()
+        if not items:
+            sounds.error()
+            print("[pegar] no hay dictados para pegar")
+            return
+
+        def go():
+            wait_modifiers()                    # que sueltes Alt antes del Ctrl+V
+            if injector.inject(items[0]["text"], capture_foreground(), keep=True):
+                print("[pegar] último dictado pegado")
+            else:
+                sounds.error()
+                _notify("No se pudo pegar. El último dictado quedó en el portapapeles: pegalo con Ctrl+V.")
+        threading.Thread(target=go, daemon=True).start()
+
     def _idle():
         return (_ready.is_set() and not recorder.is_recording and not _busy.is_set()
                 and time.time() - _last_use["t"] > updater.IDLE_S)
+
+    def _update_soon(version, manual):
+        """Antes de cerrarse para actualizar: tarjeta con cuenta atrás (5 s; 2 si lo pediste
+        desde el menú). Si mientras tanto empezás a dictar, False: espera a que termines."""
+        t0 = time.time()
+        end = t0 + (2 if manual else 5)
+        stop = {"x": False}
+        overlay.root.after(0, lambda: Splash(
+            overlay.root, lambda: stop["x"] or time.time() >= end,
+            lambda: f"Se actualiza a la {version} en {max(1, math.ceil(end - time.time()))} s"))
+        print(f"[update] aviso: se actualiza a la {version}")
+        while time.time() < end:
+            if _last_use["t"] > t0 or recorder.is_recording or _busy.is_set():
+                stop["x"] = True
+                print("[update] empezaste a dictar: la actualización espera")
+                return False
+            time.sleep(0.05)
+        return True
 
     def _close_for_update():
         open_key.stop()
@@ -699,7 +734,8 @@ def main():
     if getattr(sys, "frozen", False) and config.auto_update:
         try:   # el actualizador nunca puede impedir que la app arranque
             upd = _start_updater(_notify, _idle, _close_for_update,
-                                 lambda: _icon_ref["icon"] and _icon_ref["icon"].update_menu())
+                                 lambda: _icon_ref["icon"] and _icon_ref["icon"].update_menu(),
+                                 _update_soon)
         except Exception as e:
             print(f"[update] no pude iniciar el actualizador: {e}")
 
@@ -772,7 +808,7 @@ def main():
 
     open_key = globalkey.GlobalHotkey(_open_key_pressed)
     _set_open_hotkey(config.open_hotkey)
-    copy_key = globalkey.GlobalHotkey(copy_last)
+    copy_key = globalkey.GlobalHotkey(paste_last)
     _set_copy_hotkey(config.copy_hotkey)
     # Tecla del modo IA: siempre activa (arranca un dictado con IA o pasa el actual a IA). Va por la
     # misma cola que F9, así nunca se pisan; el hilo del atajo solo encola (no se traba nunca).
@@ -827,9 +863,7 @@ def main():
         pystray.MenuItem(lambda item: "Ajustes" if config.open_hotkey == "none"
                          else f"Ajustes ({globalkey.label(config.open_hotkey)})",
                          do_settings, default=True),  # doble-clic abre esto
-        pystray.MenuItem(lambda item: "Copiar el último dictado" if config.copy_hotkey == "none"
-                         else f"Copiar el último dictado ({globalkey.label(config.copy_hotkey)})",
-                         copy_last),
+        pystray.MenuItem("Copiar el último dictado", copy_last),
         pystray.MenuItem(_update_label, do_update, visible=upd is not None),
         pystray.MenuItem("Salir", do_quit),
     )
@@ -841,27 +875,32 @@ def main():
     print("[salida] terminó el loop principal de la interfaz")
 
 
-def _start_updater(notify, is_idle, stop, refresh_menu):
+def _start_updater(notify, is_idle, stop, refresh_menu, soon):
     """Solo en el .exe instalado: avisa si recién se actualizó y busca versiones nuevas."""
     done = updater.just_updated()
     if done:
         print(f"[update] actualizada a {done}")
         threading.Timer(5, lambda: notify(f"Se actualizó a la versión {done}.")).start()
 
-    def install(version, path):
-        notify(f"Actualizando a la versión {version}. Vuelve sola en un minuto.")
-        time.sleep(3)
-        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_mutex["h"]))
-        updater.run_installer(path, sys.executable)
+    def install(version, how):
+        if how[0] == "patch":
+            # el .cmd espera a que esta app se cierre para copiar: se lanza antes de cerrar
+            if not updater.run_patch(how[1], how[2], version, sys.executable, os.getpid()):
+                print("[update] no pude lanzar el parche; la próxima vez va el instalador completo")
+                return False
+        else:
+            notify(f"Actualizando a la versión {version}. Vuelve sola en un minuto.")
         stop()
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_mutex["h"]))
+        if how[0] == "full":
+            updater.run_installer(how[1], sys.executable)
+        print(f"[salida] se cierra para actualizar a {version}")
         os._exit(0)
 
     def ready(version):
-        notify(f"La versión {version} está lista: se instala sola cuando no estés dictando "
-               "(o ya mismo desde el menú del ícono).")
         refresh_menu()
 
-    return updater.Updater(is_idle, install, ready)
+    return updater.Updater(is_idle, install, ready, soon)
 
 
 if __name__ == "__main__":

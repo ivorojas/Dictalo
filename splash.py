@@ -17,9 +17,12 @@ _COLORS = [ui.mix(ui.CYAN, ui.VIOLET, i / (_NB - 1)) for i in range(_NB)]
 class Splash:
     W, H = 320, 184
 
-    def __init__(self, root, is_ready):
+    def __init__(self, root, is_ready, text="Cargando el modelo de voz…"):
+        """`is_ready()`: se cierra cuando da True. `text`: texto o función que lo devuelve
+        (se actualiza en cada cuadro, p. ej. una cuenta atrás)."""
         self.root = root
         self.is_ready = is_ready
+        self.text = text
         self.win = tk.Toplevel(root)
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
@@ -38,8 +41,8 @@ class Splash:
         c.create_image(4, 4, image=self._card, anchor="nw")
         c.create_image(self.W // 2, 52, image=self._logo)
         c.create_text(self.W // 2, 101, text=APP_NAME, fill=ui.TEXT, font=ui.F.h1)
-        c.create_text(self.W // 2, 124, text="Cargando el modelo de voz…", fill=ui.TEXT_2,
-                      font=ui.F.small)
+        self._text = c.create_text(self.W // 2, 124, text=self._now_text(), fill=ui.TEXT_2,
+                                   font=ui.F.small)
         self._bars = [c.create_line(0, 0, 0, 0, width=5, fill=col, capstyle="round")
                       for col in _COLORS]
         self._frame = 0
@@ -55,6 +58,9 @@ class Splash:
         except Exception:
             pass
 
+    def _now_text(self):
+        return self.text() if callable(self.text) else self.text
+
     def _tick(self):
         if self.is_ready():
             try:
@@ -63,6 +69,8 @@ class Splash:
                 pass
             return
         self._frame += 1
+        if callable(self.text):
+            self.c.itemconfigure(self._text, text=self._now_text())
         cy, x0 = 156, self.W // 2 - (_NB - 1) * 7
         for i, bar in enumerate(self._bars):
             a = (math.sin(self._frame * 0.22 - i * 0.6) + 1) / 2

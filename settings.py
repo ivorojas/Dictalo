@@ -296,8 +296,8 @@ class SettingsView(_Toast):
                                       self._set_open_hotkey, height=34)
         self.open_keys.pack(fill="x")
         ui.separator(b).pack(fill="x", pady=18)
-        ui.label(b, "Atajo para copiar el último dictado", F.body_sb).pack(anchor="w")
-        ui.label(b, "Lo copia al portapapeles sin abrir nada, para volver a pegarlo donde quieras.",
+        ui.label(b, "Atajo para pegar el último dictado", F.body_sb).pack(anchor="w")
+        ui.label(b, "Lo pega donde estás escribiendo, sin abrir nada. También queda copiado.",
                  F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
         self.copy_keys = ui.ChipGroup(b, globalkey.OPTIONS,
                                       getattr(self.ctx.config, "copy_hotkey", "alt+f1"),
@@ -668,13 +668,13 @@ class SettingsView(_Toast):
         v = u.version
         checked = f" · revisado {when(u.checked)}" if u.checked else ""
         return {
-            "idle": ("Busca versiones nuevas sola cada hora.", ui.TEXT_3, "Buscar ahora", "secondary"),
+            "idle": ("Busca versiones nuevas sola cada 10 minutos.", ui.TEXT_3, "Buscar ahora", "secondary"),
             "checking": ("Buscando…", ui.TEXT_3, None, None),
             "uptodate": (f"Estás en la última versión{checked}", ui.SUCCESS, "Buscar ahora", "secondary"),
             "downloading": (f"Bajando la versión {v}… {round(u.progress * 100)}%", ui.ACCENT, None, None),
-            "ready": (f"La versión {v} está lista. Se instala sola cuando no estés dictando.",
+            "ready": (f"La versión {v} está lista. Se instala sola en cuanto dejes de dictar unos segundos.",
                       ui.ACCENT, "Instalar ahora", "primary"),
-            "installing": (f"Instalando {v}: se cierra y vuelve sola en un minuto.", ui.ACCENT, None, None),
+            "installing": (f"Instalando {v}: se cierra y vuelve a abrir sola.", ui.ACCENT, None, None),
             "error": ("No se pudo buscar (¿sin internet?).", ui.WARN, "Probar de nuevo", "secondary"),
         }[u.state]
 

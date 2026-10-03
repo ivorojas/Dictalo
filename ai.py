@@ -14,12 +14,16 @@ from ctypes import wintypes
 
 from config import APP_DIR
 
-MODEL = "gemini-3.8-flash"     # por defecto. Flash (no Lite): medido ~2-4 s por pedido, buen texto en en/es
+MODEL = "gemini-3.1-flash-lite"   # por defecto: el más barato que sigue disponible y tan rápido como el que más (~1.5 s)
 # Elegibles en Ajustes (config.ai_model). Si uno deja de existir en la API, se avisa al usarlo.
-MODELS = [("3.8 Flash", "gemini-3.8-flash"), ("3.5 Flash", "gemini-3.5-flash"),
-          ("3.5 Flash Lite", "gemini-3.5-flash-lite"), ("3.1 Flash Lite", "gemini-3.1-flash-lite"),
-          ("2.5 Flash", "gemini-2.5-flash"),
-          ("2.5 Flash Lite", "gemini-2.5-flash-lite")]
+MODELS = [("3.1 Flash Lite", "gemini-3.1-flash-lite"), ("3.5 Flash Lite", "gemini-3.5-flash-lite"),
+          ("3.5 Flash", "gemini-3.5-flash"), ("3.8 Flash", "gemini-3.8-flash"),
+          ("2.5 Flash", "gemini-2.5-flash")]
+# Lo lento era que el modelo "piensa" antes de escribir (300-500 tokens: 3.8 Flash ~3 s → ~1.7 s sin
+# pensar; 3.5 Flash ~3.3 → ~1.3; 2.5 Flash ~1.8 → ~0.9). Para redactar un mensaje no hace falta: se
+# pide lo mínimo que acepta cada modelo (los Lite ya no piensan). Medido el 2026-10-03.
+_THINK = {"gemini-3.8-flash": {"thinkingLevel": "low"}, "gemini-3.5-flash": {"thinkingBudget": 0},
+          "gemini-2.5-flash": {"thinkingBudget": 0}}
 KEY_PATH = APP_DIR / "gemini.key"
 SYSTEM = (
     "You write text that will be pasted directly where the user is typing (a chat, an email, a "
@@ -92,13 +96,24 @@ def generate(instruction, selected=None, model=None, timeout=45):
         user += f"\n\nSELECTED TEXT:\n{selected}"
     body = {"systemInstruction": {"parts": [{"text": SYSTEM}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}]}
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"x-goog-api-key": key, "Content-Type": "application/json"})
-    try:
+    if model in _THINK:
+        body["generationConfig"] = {"thinkingConfig": _THINK[model]}
+
+    def ask():
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"x-goog-api-key": key, "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.load(r)
+            return json.load(r)
+    try:
+        try:
+            data = ask()
+        except urllib.error.HTTPError as e:
+            if e.code != 400 or "generationConfig" not in body:
+                raise
+            del body["generationConfig"]      # Google cambió qué acepta ese modelo: sin el ajuste
+            data = ask()
         parts = data["candidates"][0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts).strip()
     except urllib.error.HTTPError as e:

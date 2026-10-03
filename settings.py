@@ -167,7 +167,7 @@ def sample_context():
                                              "sin tocar el teclado, con Whisper corriendo local."},
     ]
     cfg = SimpleNamespace(
-        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", ai_hotkey="f10", ai_model="gemini-3.8-flash", pc_role="auto",
+        mic_index=-1, hotkey="<f9>", hotkey_display="F9", open_hotkey="ctrl+f1", copy_hotkey="alt+f1", ai_hotkey="f10", ai_model="gemini-3.1-flash-lite", pc_role="auto",
         sound_pack="suave",
         whisper_model="large-v3-turbo",
         overlay_preset="aurora", overlay_custom={}, overlay_mine=[], bar_intensity=0.8,
@@ -376,7 +376,7 @@ class SettingsView(_Toast):
         self.ai_keys.pack(fill="x")
         if ai.available():
             ui.label(b, "Modelo", F.body_sb).pack(anchor="w", pady=(18, 0))
-            ui.label(b, "Si uno anda lento o deja de existir, probá otro.",
+            ui.label(b, "El primero es el más rápido y barato. Los Flash escriben algo mejor y tardan más.",
                      F.small, ui.TEXT_3).pack(anchor="w", pady=(3, 12))
             self.ai_models = ui.ChipGroup(b, ai.MODELS, self._ai_model(), self._set_ai_model, height=34)
             self.ai_models.pack(fill="x")

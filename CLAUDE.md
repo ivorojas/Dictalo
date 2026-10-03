@@ -229,7 +229,12 @@ icono.ico      ícono (degradé cian→violeta con barras de onda), generado por
   la dejó configurada el asistente en el escritorio; NUNCA en prefs.json ni en el repo.
   v1.3.3 hizo que la tecla IA grabando CORTARA: ERROR, se revirtió en la v1.3.4. El log muestra que el dueño
   SIEMPRE hace F9 y al segundo F8 (pasa a IA) y recién ahí habla; con la 1.3.3 se le cortaba a los 0.4 s.
-  NO volver a cambiar eso: F8 grabando sin IA = pasa a IA y sigue grabando; F8 en modo IA = corta. Modelo elegible en Ajustes → Modo IA (`config.ai_model`,
+  NO volver a cambiar eso: F8 grabando sin IA = pasa a IA y sigue grabando; F8 en modo IA = corta.
+  VELOCIDAD (v1.3.7, el dueño: "demasiado lenta, poné el más barato y rápido"): lo lento era el "thinking"
+  (3.8 Flash 3-5 s reales). Por defecto ahora gemini-3.1-flash-lite (~1.5 s de mediana, igual que 3.5 Flash Lite y 2.5 Flash; no piensa) y a los Flash se
+  les pide pensar lo mínimo (`ai._THINK`; si la API da 400 reintenta sin eso). gemini-2.5-flash-lite ya
+  no existe (404). Abrir la conexión son 0.07 s: no vale la pena reusarla. `config.ai_model_v` migra una
+  vez a quien tenía el modelo viejo. Modelo elegible en Ajustes → Modo IA (`config.ai_model`,
   `ai.MODELS`; solo en la PC con la clave). Si Whisper devuelve solo un sonido ("Music.", "Cough.",
   `transcriber.is_noise`) o el pedido es de una palabra sin selección, NO se manda a Gemini (antes "Music."
   generó un párrafo sobre música). Rayas (— –) prohibidas: regla en el prompt + `ai._no_dashes`.

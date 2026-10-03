@@ -59,7 +59,8 @@ class Config:
     open_hotkey: str = "ctrl+f1"   # abre Ajustes con el historial arriba (ver globalkey.OPTIONS)
     copy_hotkey: str = "alt+f1"    # copia el último dictado al portapapeles, sin abrir nada
     ai_hotkey: str = "f10"         # dictar con IA (ver ai.py); el dueño usa F8
-    ai_model: str = "gemini-3.8-flash"   # modelo de Gemini del modo IA (ai.MODELS, se elige en Ajustes)
+    ai_model: str = "gemini-3.1-flash-lite"   # modelo de Gemini del modo IA (ai.MODELS, se elige en Ajustes)
+    ai_model_v: int = 1            # 1 = ya pasó al modelo rápido (v1.3.7); ver _load
 
     # Ventanita flotante: estilo elegido (id de preset, "custom" o "mine:<nombre>"),
     # el personalizado en edición y los guardados por el usuario (ver looks.py)
@@ -91,6 +92,10 @@ class Config:
                     setattr(self, k, v)
             if "copy_hotkey" not in data and self.open_hotkey == self.copy_hotkey:
                 self.open_hotkey = "ctrl+f1"   # antes de v1.2.13 Alt+F1 solo podía abrir Ajustes
+            if "ai_model_v" not in data:
+                # v1.3.7: el dueño pidió "el más barato y el más rápido"; quien tenía el de antes
+                # (3.8 Flash, ~3-5 s) pasa una vez al nuevo. Después manda lo que elija en Ajustes.
+                self.ai_model = type(self).ai_model
             if "pc_role" not in data and data.get("remote_role") in ("main", "terminal"):
                 self.pc_role = data["remote_role"]   # v1.2.15-16: "off" era solo el default, pasa a auto
         except Exception:

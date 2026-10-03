@@ -325,8 +325,14 @@ class Injector:
         # 1s de margen: algunas apps (Electron/navegador cargado) leen el pegado
         # tarde y, si restaurábamos antes, pegaban lo que tenías copiado.
         if old is not None and not keep:
+            mine = user32.GetClipboardSequenceNumber()
+
             def _restore():
                 time.sleep(1.0)
+                # Si en ese segundo copiaste otra cosa (un link), es tuya: no se pisa con lo viejo.
+                if user32.GetClipboardSequenceNumber() != mine:
+                    print("[inject] copiaste otra cosa mientras tanto: no restauro el portapapeles")
+                    return
                 _clipboard_set(old)
             threading.Thread(target=_restore, daemon=True).start()
         return True

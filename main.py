@@ -306,15 +306,14 @@ def main():
     # Todo lo que ves y oís va PRIMERO (ventanita y sonido al instante); el micrófono abre después
     # (tarda ~10 ms, antes de que empieces a hablar) y el texto seleccionado se copia en 2do plano
     # (puede tardar ~1 s esperando al portapapeles): al cortar, work() espera esa copia.
-    def _enable_ai(origin, sound=True):
+    def _enable_ai(origin):
         """Modo IA en el dictado en curso. Local: copia acá la selección; remoto: la manda la
         otra PC después con {"t":"sel"}."""
         ev = threading.Event()
         _rec["ai"], _rec["sel"], _rec["sel_ready"] = True, "", ev
         overlay.set_ai(True)
         if origin == "local":
-            if sound:
-                sounds.ai_on()
+            sounds.ai_on()
 
             def copy():
                 sel = ""
@@ -354,7 +353,8 @@ def main():
             return
 
         if recorder.is_recording and want_ai and not _rec["ai"]:
-            _enable_ai(origin, sound=False)     # F8 grabando: corta YA y lo procesa con IA
+            _enable_ai(origin)                  # F8 grabando: este dictado pasa a modo IA
+            return
 
         if recorder.is_recording:
             away = _rec["away"] = origin == "remote"   # la tecla de cierre llegó de la otra PC: ahí se pega
@@ -512,9 +512,10 @@ def main():
                     sounds.error()
                     _notify("La PC principal no respondió. ¿Tiene Dictado App abierta como Principal?")
             threading.Timer(3.0, _no_answer).start()
-        elif enabling:                          # F8 grabando: la principal corta y lo procesa con IA
+        elif enabling:
             _term["ai"] = True
             overlay.set_ai(True)
+            sounds.ai_on()
         if enabling:                            # la selección se copia acá y viaja aparte
             threading.Thread(target=lambda: remote.send({"t": "sel", "sel": copy_selection()}),
                              daemon=True).start()

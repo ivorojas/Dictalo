@@ -363,10 +363,10 @@ class SettingsView(_Toast):
         card = ui.Card(p)
         card.pack(fill="x", pady=(0, 28))
         b = card.body
-        ui.label(b, "Apretá la tecla del modo IA para dictar directo con IA; si ya estás dictando, "
-                    "esa tecla corta y lo procesa con IA. Tu dictado pasa a ser un pedido y se pega lo "
-                    "que escribe la IA, en inglés salvo que pidas otro idioma. Si tenías texto "
-                    "seleccionado, trabaja sobre ese texto.", F.small, ui.TEXT_2,
+        ui.label(b, "Apretá la tecla del modo IA para dictar directo con IA (o mientras dictás, para "
+                    "pasar ese dictado a IA): tu dictado pasa a ser un pedido y se pega lo que escribe la "
+                    "IA, en inglés salvo que pidas otro idioma. Si tenías texto seleccionado, trabaja "
+                    "sobre ese texto. Otra vez la tecla (o F9) corta.", F.small, ui.TEXT_2,
                  wraplength=440).pack(anchor="w", pady=(0, 14))
         ui.label(b, "Tecla del modo IA", F.body_sb).pack(anchor="w")
         ui.label(b, "Queda reservada para Dictado App (tus otras apps no la reciben).",
